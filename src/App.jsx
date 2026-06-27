@@ -236,20 +236,16 @@ function Store({ session }) {
   }
 
   // Pay directly from wallet balance — deducts immediately, order is 'paid'.
-  async function payWithWallet() {
+ async function payWithWallet() {
     if (subtotal <= 0) return;
-    if (subtotal > wallet) { flash("Not enough wallet balance"); return; }
     const items = cartDetailed.map((i) => ({ name: i.name, qty: i.qty, price: i.price }));
-    const next = wallet - subtotal;
-    const { error: oErr } = await supabase.from("orders").insert({ user_id: userId, total: subtotal, items, status: "paid" });
-    if (oErr) { flash(oErr.message); return; }
-    await supabase.from("profiles").update({ wallet: next }).eq("id", userId);
-    await supabase.from("wallet_log").insert({ user_id: userId, type: "Wallet purchase", amount: -subtotal });
+    const { error } = await supabase.rpc("purchase_with_wallet", { p_items: items, p_total: subtotal });
+    if (error) { flash(error.message); return; }
     await supabase.from("cart_items").delete().eq("user_id", userId);
-    setWallet(next); setCart([]); setCheckoutOpen(false);
+    setCart([]); setCheckoutOpen(false);
     flash("Paid from wallet 🎉"); setTab("shop");
+    // wallet balance updates live via realtime; no manual math here
   }
-
   if (loading) return <div style={S.center}><Loader2 className="spin" size={32} color="#FF6B9D" /></div>;
 
   return (
@@ -512,21 +508,13 @@ function AdminOrders({ flash }) {
   }
 
   // Approve = mark paid AND credit the buyer's wallet by the order total.
-  async function approve(o) {
+ async function approve(o) {
     setWorkingId(o.id);
-    try {
-      const { data: prof, error: pErr } = await supabase.from("profiles").select("wallet").eq("id", o.user_id).single();
-      if (pErr) throw pErr;
-      const next = Number(prof.wallet || 0) + Number(o.total);
-      const { error: uErr } = await supabase.from("profiles").update({ wallet: next }).eq("id", o.user_id);
-      if (uErr) throw uErr;
-      await supabase.from("wallet_log").insert({ user_id: o.user_id, type: `Order #${o.id} approved`, amount: Number(o.total) });
-      const { error: oErr } = await supabase.from("orders").update({ status: "paid" }).eq("id", o.id);
-      if (oErr) throw oErr;
-      flash(`Approved · ${money(o.total)} credited to wallet ✓`);
-      load();
-    } catch (e) { flash("Approve failed: " + e.message); }
-    finally { setWorkingId(null); }
+    const { error } = await supabase.rpc("approve_order", { p_order_id: o.id });
+    setWorkingId(null);
+    if (error) { flash("Approve failed: " + error.message); return; }
+    flash(`Approved · ${money(o.total)} credited ✓`);
+    load();
   }
   async function cancel(id) {
     const { error } = await supabase.from("orders").update({ status: "cancelled" }).eq("id", id);
