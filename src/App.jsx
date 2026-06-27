@@ -25,7 +25,7 @@ const OCCASIONS = [
 const money = (n) => `$${Number(n).toFixed(2)}`;
 
 // ⚠️ CHANGE THIS to the email you sign in with — must match your Supabase policies.
-const ADMIN_EMAIL = "YOUR_ADMIN_EMAIL@example.com";
+const ADMIN_EMAIL = "ch.sambasiva998@gmail.com";
 
 // Build a UPI deep-link string. amount uses '.' decimal, INR assumed by UPI apps.
 function buildUpiString({ upiId, payeeName, amount, note }) {
@@ -516,7 +516,7 @@ function AdminSettings({ flash, onChanged, settings }) {
   const [busy, setBusy] = useState(false);
 
   async function save() {
-    if (!upiId.trim()) { flash("Enter your UPI ID"); return; }
+    if (!upiId.trim()) { flash("7981166388-2@ybl"); return; }
     setBusy(true);
     const { error } = await supabase.from("store_settings")
       .upsert({ id: 1, upi_id: upiId.trim(), payee_name: payeeName.trim(), updated_at: new Date().toISOString() });
