@@ -3,16 +3,20 @@ import {
   ShoppingCart, Wallet, Calendar, Gift, Search, Plus, Minus, X,
   Bell, Star, Trash2, Heart, Check, ArrowRight, Sparkles, Package,
   CreditCard, PartyPopper, CakeSlice, Baby, GraduationCap, LogOut, Loader2,
-  QrCode, ClipboardList, Settings,
+  QrCode, ClipboardList, Settings, Zap,
 } from "lucide-react";
 import QRCode from "qrcode";
 import { supabase } from "./supabaseClient";
 
 /* ============================================================
-   TOYBOX — toy & gift store, Supabase-backed
-   Email+password auth · catalog + admin · UPI QR per toy
-   Orders are PENDING until the admin manually confirms payment
-   (no gateway — you verify each payment in your own UPI app).
+   TOYBOX — toy & gift store (Supabase)
+   • Email+password auth + forgot password
+   • Admin: products (add/delete), payment UPI, orders
+   • Per-toy QR + dynamic whole-cart QR (UPI)
+   • Admin approves an order -> credits buyer's wallet (order total)
+   • Realtime wallet balance (live updates)
+   • Wallet direct purchase (deducts balance, no QR needed)
+   No payment gateway: admin manually verifies UPI receipts.
    ============================================================ */
 
 const OCCASIONS = [
@@ -24,17 +28,13 @@ const OCCASIONS = [
 
 const money = (n) => `$${Number(n).toFixed(2)}`;
 
-// ⚠️ CHANGE THIS to the email you sign in with — must match your Supabase policies.
+// ⚠️ MUST equal your login email AND the email in your Supabase policies.
 const ADMIN_EMAIL = "ch.sambasiva998@gmail.com";
 
-// Build a UPI deep-link string. amount uses '.' decimal, INR assumed by UPI apps.
 function buildUpiString({ upiId, payeeName, amount, note }) {
   const params = new URLSearchParams({
-    pa: upiId,
-    pn: payeeName || "TOYBOX",
-    am: Number(amount).toFixed(2),
-    cu: "INR",
-    tn: note || "TOYBOX order",
+    pa: upiId, pn: payeeName || "TOYBOX",
+    am: Number(amount).toFixed(2), cu: "INR", tn: note || "TOYBOX order",
   });
   return `upi://pay?${params.toString()}`;
 }
@@ -45,49 +45,37 @@ function suggestForOccasion(occId, products) {
   return [...products]
     .map((p) => ({ p, score: (p.tags || []).filter((t) => occ.tags.includes(t)).length }))
     .sort((a, b) => b.score - a.score || b.p.rating - a.p.rating)
-    .slice(0, 6)
-    .map((x) => x.p);
+    .slice(0, 6).map((x) => x.p);
 }
 
-/* ============================================================
-   QR component — renders a UPI string to a canvas in-browser
-   ============================================================ */
-function UpiQR({ value, size = 200 }) {
+function UpiQR({ value, size = 210 }) {
   const [dataUrl, setDataUrl] = useState(null);
   useEffect(() => {
     let alive = true;
     QRCode.toDataURL(value, { width: size, margin: 1, color: { dark: "#26283d", light: "#ffffff" } })
-      .then((url) => { if (alive) setDataUrl(url); })
-      .catch(() => { if (alive) setDataUrl(null); });
+      .then((u) => { if (alive) setDataUrl(u); }).catch(() => { if (alive) setDataUrl(null); });
     return () => { alive = false; };
   }, [value, size]);
   if (!dataUrl) return <div style={{ width: size, height: size, display: "flex", alignItems: "center", justifyContent: "center" }}><Loader2 className="spin" size={24} color="#FF6B9D" /></div>;
   return <img src={dataUrl} alt="UPI QR code" width={size} height={size} style={{ borderRadius: 12 }} />;
 }
 
-/* ============================================================
-   ROOT
-   ============================================================ */
+/* ===================== ROOT ===================== */
 export default function App() {
   const [session, setSession] = useState(null);
-  const [authReady, setAuthReady] = useState(false);
-
+  const [ready, setReady] = useState(false);
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => { setSession(data.session); setAuthReady(true); });
+    supabase.auth.getSession().then(({ data }) => { setSession(data.session); setReady(true); });
     const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => setSession(s));
     return () => sub.subscription.unsubscribe();
   }, []);
-
-  if (!authReady)
-    return <div style={S.center}><Loader2 className="spin" size={32} color="#FF6B9D" /></div>;
+  if (!ready) return <div style={S.center}><Loader2 className="spin" size={32} color="#FF6B9D" /></div>;
   return session ? <Store session={session} /> : <AuthScreen />;
 }
 
-/* ============================================================
-   AUTH
-   ============================================================ */
+/* ===================== AUTH (with forgot password) ===================== */
 function AuthScreen() {
-  const [mode, setMode] = useState("signin");
+  const [mode, setMode] = useState("signin"); // signin | signup | reset
   const [email, setEmail] = useState("");
   const [pass, setPass] = useState("");
   const [msg, setMsg] = useState(null);
@@ -95,12 +83,20 @@ function AuthScreen() {
 
   async function submit() {
     setBusy(true); setMsg(null);
-    const fn = mode === "signin"
-      ? supabase.auth.signInWithPassword({ email, password: pass })
-      : supabase.auth.signUp({ email, password: pass });
-    const { error } = await fn;
-    if (error) setMsg(error.message);
-    else if (mode === "signup") setMsg("Check your email to confirm, then sign in.");
+    try {
+      if (mode === "reset") {
+        const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin });
+        if (error) throw error;
+        setMsg("Password reset link sent — check your email.");
+      } else if (mode === "signin") {
+        const { error } = await supabase.auth.signInWithPassword({ email, password: pass });
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.auth.signUp({ email, password: pass });
+        if (error) throw error;
+        setMsg("Check your email to confirm, then sign in.");
+      }
+    } catch (e) { setMsg(e.message); }
     setBusy(false);
   }
 
@@ -111,15 +107,24 @@ function AuthScreen() {
         <div style={S.authCard}>
           <div style={{ fontSize: 44, textAlign: "center" }}>🧸</div>
           <div style={S.authBrand}>TOYBOX</div>
-          <div style={S.authTag}>{mode === "signin" ? "Welcome back." : "Create your account."}</div>
+          <div style={S.authTag}>
+            {mode === "signin" ? "Welcome back." : mode === "signup" ? "Create your account." : "Reset your password."}
+          </div>
           <input style={S.input} type="email" placeholder="you@email.com" value={email} onChange={(e) => setEmail(e.target.value)} />
-          <input style={S.input} type="password" placeholder="Password (6+ chars)" value={pass} onChange={(e) => setPass(e.target.value)} />
+          {mode !== "reset" && (
+            <input style={S.input} type="password" placeholder="Password (6+ chars)" value={pass} onChange={(e) => setPass(e.target.value)} />
+          )}
           <button className="cta full" disabled={busy} onClick={submit}>
-            {busy ? <Loader2 className="spin" size={16} /> : mode === "signin" ? "Sign in" : "Sign up"}
+            {busy ? <Loader2 className="spin" size={16} /> : mode === "signin" ? "Sign in" : mode === "signup" ? "Sign up" : "Send reset link"}
           </button>
           {msg && <div style={S.authMsg}>{msg}</div>}
+          {mode === "signin" && (
+            <div style={S.authSwitch}>
+              <button className="linkbtn" onClick={() => { setMode("reset"); setMsg(null); }}>Forgot password?</button>
+            </div>
+          )}
           <div style={S.authSwitch}>
-            {mode === "signin" ? "New here?" : "Have an account?"}{" "}
+            {mode === "signin" ? "New here? " : "Have an account? "}
             <button className="linkbtn" onClick={() => { setMode(mode === "signin" ? "signup" : "signin"); setMsg(null); }}>
               {mode === "signin" ? "Create one" : "Sign in"}
             </button>
@@ -130,9 +135,7 @@ function AuthScreen() {
   );
 }
 
-/* ============================================================
-   STORE
-   ============================================================ */
+/* ===================== STORE ===================== */
 function Store({ session }) {
   const userId = session.user.id;
   const isAdmin = session.user.email === ADMIN_EMAIL;
@@ -151,9 +154,22 @@ function Store({ session }) {
   const [toast, setToast] = useState(null);
   const [checkoutOpen, setCheckoutOpen] = useState(false);
 
-  function flash(m) { setToast(m); setTimeout(() => setToast(null), 2600); }
+  function flash(m) { setToast(m); setTimeout(() => setToast(null), 2800); }
 
   useEffect(() => { loadAll(); }, []);
+
+  // Realtime: listen for wallet balance + activity changes for THIS user
+  useEffect(() => {
+    const ch = supabase
+      .channel("wallet-rt")
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "profiles", filter: `id=eq.${userId}` },
+        (payload) => { if (payload.new?.wallet != null) setWallet(Number(payload.new.wallet)); })
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "wallet_log", filter: `user_id=eq.${userId}` },
+        (payload) => { setWalletLog((l) => [payload.new, ...l]); })
+      .subscribe();
+    return () => { supabase.removeChannel(ch); };
+  }, [userId]);
+
   async function loadAll() {
     setLoading(true);
     const [prod, prof, log, c, rem, setg] = await Promise.all([
@@ -182,10 +198,7 @@ function Store({ session }) {
   const results = useMemo(() => {
     if (!query.trim()) return products;
     const q = query.toLowerCase();
-    return products.filter((p) =>
-      p.name.toLowerCase().includes(q) ||
-      (p.category || "").toLowerCase().includes(q) ||
-      (p.description || "").toLowerCase().includes(q));
+    return products.filter((p) => p.name.toLowerCase().includes(q) || (p.category || "").toLowerCase().includes(q) || (p.description || "").toLowerCase().includes(q));
   }, [query, products]);
 
   async function addToCart(pid) {
@@ -196,10 +209,8 @@ function Store({ session }) {
     await supabase.from("cart_items").upsert({ user_id: userId, product_id: pid, qty }, { onConflict: "user_id,product_id" });
   }
   async function setQty(pid, d) {
-    const item = cart.find((i) => i.product_id === pid);
-    if (!item) return;
-    const qty = item.qty + d;
-    if (qty <= 0) return removeFromCart(pid);
+    const item = cart.find((i) => i.product_id === pid); if (!item) return;
+    const qty = item.qty + d; if (qty <= 0) return removeFromCart(pid);
     setCart((c) => c.map((i) => i.product_id === pid ? { ...i, qty } : i));
     await supabase.from("cart_items").update({ qty }).eq("user_id", userId).eq("product_id", pid);
   }
@@ -207,34 +218,39 @@ function Store({ session }) {
     setCart((c) => c.filter((i) => i.product_id !== pid));
     await supabase.from("cart_items").delete().eq("user_id", userId).eq("product_id", pid);
   }
-  function toggleFav(id) {
-    setFavorites((f) => { const n = new Set(f); n.has(id) ? n.delete(id) : n.add(id); return n; });
-  }
+  function toggleFav(id) { setFavorites((f) => { const n = new Set(f); n.has(id) ? n.delete(id) : n.add(id); return n; }); }
 
   async function topUp(amt) {
-    const next = wallet + amt;
-    setWallet(next); flash(`${money(amt)} added`);
+    const next = wallet + amt; setWallet(next); flash(`${money(amt)} added`);
     await supabase.from("profiles").update({ wallet: next }).eq("id", userId);
     await supabase.from("wallet_log").insert({ user_id: userId, type: "Top-up", amount: amt });
-    refreshLog();
-  }
-  async function refreshLog() {
-    const { data } = await supabase.from("wallet_log").select("*").eq("user_id", userId).order("created_at", { ascending: false });
-    setWalletLog(data || []);
   }
 
-  // Creates a PENDING order. Payment is via UPI QR, confirmed later by admin.
+  // Create a PENDING order to be paid by UPI then approved by admin.
   async function createPendingOrder() {
     const items = cartDetailed.map((i) => ({ name: i.name, qty: i.qty, price: i.price }));
     const { data, error } = await supabase.from("orders")
-      .insert({ user_id: userId, total: subtotal, items, status: "pending" })
-      .select().single();
+      .insert({ user_id: userId, total: subtotal, items, status: "pending" }).select().single();
     if (error) { flash(error.message); return null; }
     return data;
   }
 
-  if (loading)
-    return <div style={S.center}><Loader2 className="spin" size={32} color="#FF6B9D" /></div>;
+  // Pay directly from wallet balance — deducts immediately, order is 'paid'.
+  async function payWithWallet() {
+    if (subtotal <= 0) return;
+    if (subtotal > wallet) { flash("Not enough wallet balance"); return; }
+    const items = cartDetailed.map((i) => ({ name: i.name, qty: i.qty, price: i.price }));
+    const next = wallet - subtotal;
+    const { error: oErr } = await supabase.from("orders").insert({ user_id: userId, total: subtotal, items, status: "paid" });
+    if (oErr) { flash(oErr.message); return; }
+    await supabase.from("profiles").update({ wallet: next }).eq("id", userId);
+    await supabase.from("wallet_log").insert({ user_id: userId, type: "Wallet purchase", amount: -subtotal });
+    await supabase.from("cart_items").delete().eq("user_id", userId);
+    setWallet(next); setCart([]); setCheckoutOpen(false);
+    flash("Paid from wallet 🎉"); setTab("shop");
+  }
+
+  if (loading) return <div style={S.center}><Loader2 className="spin" size={32} color="#FF6B9D" /></div>;
 
   return (
     <div style={S.app}>
@@ -242,10 +258,7 @@ function Store({ session }) {
       <header style={S.header}>
         <div style={S.brand}>
           <span style={S.logoMark}>🧸</span>
-          <div>
-            <div style={S.brandName}>TOYBOX</div>
-            <div style={S.brandTag}>toys & gifts, delivered with delight</div>
-          </div>
+          <div><div style={S.brandName}>TOYBOX</div><div style={S.brandTag}>toys & gifts, delivered with delight</div></div>
         </div>
         <nav style={S.nav}>
           {[
@@ -263,13 +276,13 @@ function Store({ session }) {
               <Settings size={17} /> Admin
             </button>
           )}
+          <button className="walletchip" onClick={() => setTab("wallet")} title="Wallet balance">
+            <Wallet size={15} /> {money(wallet)}
+          </button>
           <button className="cartbtn" onClick={() => setTab("cart")}>
-            <ShoppingCart size={18} />
-            {cartCount > 0 && <span className="badge">{cartCount}</span>}
+            <ShoppingCart size={18} />{cartCount > 0 && <span className="badge">{cartCount}</span>}
           </button>
-          <button className="iconbtn" title="Sign out" onClick={() => supabase.auth.signOut()}>
-            <LogOut size={18} />
-          </button>
+          <button className="iconbtn" title="Sign out" onClick={() => supabase.auth.signOut()}><LogOut size={18} /></button>
         </nav>
       </header>
 
@@ -283,28 +296,19 @@ function Store({ session }) {
                 <p style={S.heroSub}>Wonder-packed toys, keepsakes, and surprises — sorted by who you're shopping for and what you're celebrating.</p>
                 <button className="cta" onClick={() => setTab("occasions")}>Shop by occasion <ArrowRight size={16} /></button>
               </div>
-              <div style={S.heroArt}>
-                {["🚀", "🎨", "🤖", "🧸", "⭐", "🎁"].map((e, i) => (
-                  <span key={i} className="float" style={{ animationDelay: `${i * 0.4}s` }}>{e}</span>
-                ))}
-              </div>
+              <div style={S.heroArt}>{["🚀","🎨","🤖","🧸","⭐","🎁"].map((e, i) => <span key={i} className="float" style={{ animationDelay: `${i*0.4}s` }}>{e}</span>)}</div>
             </section>
             <div style={S.searchRow}>
-              <div style={S.searchWrap}>
-                <Search size={18} color="#9aa0b5" />
-                <input style={S.search} placeholder="Search toys, categories…" value={query} onChange={(e) => setQuery(e.target.value)} />
-              </div>
+              <div style={S.searchWrap}><Search size={18} color="#9aa0b5" />
+                <input style={S.search} placeholder="Search toys, categories…" value={query} onChange={(e) => setQuery(e.target.value)} /></div>
               <span style={S.resultCount}>{results.length} items</span>
             </div>
             {results.length === 0 ? (
               <div style={S.empty}><Package size={32} color="#c7ccdb" /><p>No toys in the shop yet.{isAdmin ? " Add some from the Admin tab." : ""}</p></div>
             ) : (
-              <div style={S.grid}>
-                {results.map((p) => (
-                  <ProductCard key={p.id} p={p} fav={favorites.has(p.id)} onFav={() => toggleFav(p.id)} onAdd={() => addToCart(p.id)}
-                    settings={settings} />
-                ))}
-              </div>
+              <div style={S.grid}>{results.map((p) => (
+                <ProductCard key={p.id} p={p} fav={favorites.has(p.id)} onFav={() => toggleFav(p.id)} onAdd={() => addToCart(p.id)} settings={settings} />
+              ))}</div>
             )}
           </>
         )}
@@ -313,169 +317,124 @@ function Store({ session }) {
           <>
             <h2 style={S.sectionTitle}>What are we celebrating?</h2>
             <p style={S.sectionSub}>Pick a moment and we'll match the perfect gifts.</p>
-            <div style={S.occRow}>
-              {OCCASIONS.map((o) => (
-                <button key={o.id} className={`occchip ${activeOcc === o.id ? "occchip-on" : ""}`}
-                  style={activeOcc === o.id ? { borderColor: o.hue, background: o.hue + "1a" } : {}}
-                  onClick={() => setActiveOcc(o.id)}>
-                  <span style={{ ...S.occIcon, background: o.hue + "22", color: o.hue }}><o.icon size={20} /></span>
-                  {o.label}
-                </button>
-              ))}
-            </div>
-            <div style={S.suggestHead}><Sparkles size={16} color="#FF6B9D" />
-              <span>Curated picks for {OCCASIONS.find((o) => o.id === activeOcc)?.label}</span></div>
+            <div style={S.occRow}>{OCCASIONS.map((o) => (
+              <button key={o.id} className={`occchip ${activeOcc === o.id ? "occchip-on" : ""}`}
+                style={activeOcc === o.id ? { borderColor: o.hue, background: o.hue + "1a" } : {}} onClick={() => setActiveOcc(o.id)}>
+                <span style={{ ...S.occIcon, background: o.hue + "22", color: o.hue }}><o.icon size={20} /></span>{o.label}
+              </button>
+            ))}</div>
+            <div style={S.suggestHead}><Sparkles size={16} color="#FF6B9D" /><span>Curated picks for {OCCASIONS.find((o) => o.id === activeOcc)?.label}</span></div>
             {suggestions.length === 0 ? (
               <div style={S.empty}><Gift size={32} color="#c7ccdb" /><p>Add toys to see occasion picks.</p></div>
             ) : (
-              <div style={S.grid}>
-                {suggestions.map((p) => (
-                  <ProductCard key={p.id} p={p} fav={favorites.has(p.id)} onFav={() => toggleFav(p.id)} onAdd={() => addToCart(p.id)} settings={settings} />
-                ))}
-              </div>
+              <div style={S.grid}>{suggestions.map((p) => (
+                <ProductCard key={p.id} p={p} fav={favorites.has(p.id)} onFav={() => toggleFav(p.id)} onAdd={() => addToCart(p.id)} settings={settings} />
+              ))}</div>
             )}
           </>
         )}
 
         {tab === "calendar" && (
-          <RemindersPanel userId={userId} reminders={reminders} setReminders={setReminders}
-            flash={flash} onShop={(occ) => { setActiveOcc(occ); setTab("occasions"); }} />
+          <RemindersPanel userId={userId} reminders={reminders} setReminders={setReminders} flash={flash}
+            onShop={(occ) => { setActiveOcc(occ); setTab("occasions"); }} />
         )}
 
         {tab === "wallet" && <WalletPanel wallet={wallet} log={walletLog} onTopUp={topUp} />}
 
         {tab === "cart" && (
-          <CartPanel items={cartDetailed} subtotal={subtotal}
-            onQty={setQty} onRemove={removeFromCart}
-            onCheckout={() => setCheckoutOpen(true)} onShop={() => setTab("shop")} />
+          <CartPanel items={cartDetailed} subtotal={subtotal} wallet={wallet}
+            onQty={setQty} onRemove={removeFromCart} onCheckout={() => setCheckoutOpen(true)}
+            onWalletPay={payWithWallet} onShop={() => setTab("shop")} />
         )}
 
-        {tab === "admin" && isAdmin && (
-          <AdminPanel flash={flash} onChanged={loadAll} products={products} settings={settings} />
-        )}
+        {tab === "admin" && isAdmin && <AdminPanel flash={flash} onChanged={loadAll} products={products} settings={settings} />}
       </main>
 
       {checkoutOpen && (
-        <CheckoutModal
-          items={cartDetailed} subtotal={subtotal} settings={settings}
-          onClose={() => setCheckoutOpen(false)}
-          onConfirm={createPendingOrder}
+        <CheckoutModal items={cartDetailed} subtotal={subtotal} settings={settings} wallet={wallet}
+          onClose={() => setCheckoutOpen(false)} onConfirm={createPendingOrder} onWalletPay={payWithWallet}
           onDone={async () => {
             await supabase.from("cart_items").delete().eq("user_id", userId);
             setCart([]); setCheckoutOpen(false); flash("Order placed — pending payment confirmation"); setTab("shop");
-          }}
-          flash={flash}
-        />
+          }} />
       )}
 
       {toast && <div className="toast">{toast}</div>}
-
-      <footer style={S.footer}>
-        <span>🧸 TOYBOX</span>
-        <span style={{ color: "#9aa0b5" }}>Signed in as {session.user.email}</span>
-      </footer>
+      <footer style={S.footer}><span>🧸 TOYBOX</span><span style={{ color: "#9aa0b5" }}>Signed in as {session.user.email}</span></footer>
     </div>
   );
 }
 
-/* ============================================================
-   CHECKOUT — shows a UPI QR for the order total
-   ============================================================ */
-function CheckoutModal({ items, subtotal, settings, onClose, onConfirm, onDone, flash }) {
+/* ===================== CHECKOUT (cart QR + wallet pay) ===================== */
+function CheckoutModal({ items, subtotal, settings, wallet, onClose, onConfirm, onWalletPay, onDone }) {
   const [order, setOrder] = useState(null);
   const [creating, setCreating] = useState(false);
   const hasUpi = settings?.upi_id?.trim();
+  const canWallet = wallet >= subtotal && subtotal > 0;
 
-  async function start() {
-    setCreating(true);
-    const o = await onConfirm();
-    setCreating(false);
-    if (o) setOrder(o);
-  }
+  async function startQR() { setCreating(true); const o = await onConfirm(); setCreating(false); if (o) setOrder(o); }
 
   const upiString = hasUpi ? buildUpiString({
-    upiId: settings.upi_id, payeeName: settings.payee_name,
-    amount: subtotal, note: order ? `TOYBOX #${order.id}` : "TOYBOX order",
+    upiId: settings.upi_id, payeeName: settings.payee_name, amount: subtotal,
+    note: order ? `TOYBOX #${order.id}` : "TOYBOX cart",
   }) : "";
 
   return (
     <Modal onClose={onClose}>
       <h3 style={S.modalTitle}>Checkout</h3>
-      <div style={S.checkoutRows}>
-        {items.map((i) => (
-          <div key={i.id} style={S.checkoutRow}>
-            <span>{i.emoji} {i.name} ×{i.qty}</span><span>{money(i.price * i.qty)}</span>
-          </div>
-        ))}
-      </div>
-      <div style={S.payBox}>
-        <div style={{ ...S.payLine, ...S.payTotal }}><span>Total</span><span>{money(subtotal)}</span></div>
-      </div>
+      <div style={S.checkoutRows}>{items.map((i) => (
+        <div key={i.id} style={S.checkoutRow}><span>{i.emoji} {i.name} ×{i.qty}</span><span>{money(i.price * i.qty)}</span></div>
+      ))}</div>
+      <div style={S.payBox}><div style={{ ...S.payLine, ...S.payTotal }}><span>Total</span><span>{money(subtotal)}</span></div>
+        <div style={S.payLine}><span>Wallet balance</span><span>{money(wallet)}</span></div></div>
+
+      {canWallet && (
+        <button className="cta full" style={{ marginBottom: 12 }} onClick={onWalletPay}>
+          <Zap size={16} /> Pay {money(subtotal)} from wallet
+        </button>
+      )}
 
       {!hasUpi ? (
-        <div style={S.warn}>The shop hasn't set up a UPI ID yet, so payment isn't available. (Admin: add it in the Admin tab.)</div>
+        <div style={S.warn}>No UPI ID set up yet. {canWallet ? "You can still pay from wallet above." : "Ask the shop to add one."}</div>
       ) : !order ? (
-        <button className="cta full" disabled={creating} onClick={start}>
-          {creating ? <Loader2 className="spin" size={16} /> : <QrCode size={16} />} Generate payment QR
+        <button className="ghostbtn" style={{ width: "100%", padding: 13 }} disabled={creating} onClick={startQR}>
+          {creating ? <Loader2 className="spin" size={16} /> : <QrCode size={16} />} Pay by UPI QR instead
         </button>
       ) : (
         <div style={{ textAlign: "center" }}>
           <div style={S.qrWrap}><UpiQR value={upiString} size={210} /></div>
-          <div style={S.qrHint}>Scan with any UPI app to pay {money(subtotal)} to <b>{settings.upi_id}</b></div>
-          <a className="cta full" href={upiString} style={{ textDecoration: "none", marginBottom: 10 }}>
-            Open in UPI app
-          </a>
-          <p style={S.qrNote}>
-            After paying, tap below. Your order stays <b>pending</b> until the shop confirms the payment was received.
-          </p>
-          <button className="ghostbtn" style={{ width: "100%", padding: 12 }} onClick={onDone}>
-            I've paid — place order
-          </button>
+          <div style={S.qrHint}>Scan to pay {money(subtotal)} to <b>{settings.upi_id}</b></div>
+          <a className="cta full" href={upiString} style={{ textDecoration: "none", marginBottom: 10 }}>Open in UPI app</a>
+          <p style={S.qrNote}>Order #{order.id} is <b>pending</b>. Once the shop confirms your UPI payment, the amount is credited to your wallet.</p>
+          <button className="ghostbtn" style={{ width: "100%", padding: 12 }} onClick={onDone}>I've paid — place order</button>
         </div>
       )}
     </Modal>
   );
 }
 
-/* ============================================================
-   PRODUCT CARD — includes a per-toy "view QR" option
-   ============================================================ */
+/* ===================== PRODUCT CARD (per-toy QR) ===================== */
 function ProductCard({ p, fav, onFav, onAdd, settings }) {
   const [showQR, setShowQR] = useState(false);
   const hasUpi = settings?.upi_id?.trim();
-  const upiString = hasUpi ? buildUpiString({
-    upiId: settings.upi_id, payeeName: settings.payee_name, amount: p.price, note: `TOYBOX ${p.name}`,
-  }) : "";
-
+  const upiString = hasUpi ? buildUpiString({ upiId: settings.upi_id, payeeName: settings.payee_name, amount: p.price, note: `TOYBOX ${p.name}` }) : "";
   return (
     <div className="card">
-      <button className={`favbtn ${fav ? "favon" : ""}`} onClick={onFav} aria-label="favorite">
-        <Heart size={16} fill={fav ? "#FF6B9D" : "none"} />
-      </button>
-      <div className="cardArt">
-        {p.image_url ? <img src={p.image_url} alt={p.name} className="cardImg" /> : p.emoji}
-      </div>
+      <button className={`favbtn ${fav ? "favon" : ""}`} onClick={onFav} aria-label="favorite"><Heart size={16} fill={fav ? "#FF6B9D" : "none"} /></button>
+      <div className="cardArt">{p.image_url ? <img src={p.image_url} alt={p.name} className="cardImg" /> : p.emoji}</div>
       <div style={S.cardBody}>
-        <div style={S.cardTop}>
-          <span style={S.cat}>{p.category}</span>
-          <span style={S.rating}><Star size={12} fill="#FFB454" color="#FFB454" /> {p.rating}</span>
-        </div>
+        <div style={S.cardTop}><span style={S.cat}>{p.category}</span><span style={S.rating}><Star size={12} fill="#FFB454" color="#FFB454" /> {p.rating}</span></div>
         <div style={S.cardName}>{p.name}</div>
         {p.description && <div style={S.cardDesc}>{p.description}</div>}
         <div style={S.cardMeta}>Ages {p.age_range}</div>
         <div style={S.cardFoot}>
           <span style={S.price}>{money(p.price)}</span>
           <div style={{ display: "flex", gap: 6 }}>
-            {hasUpi && (
-              <button className="iconbtn" title="Pay this toy via UPI QR" style={{ color: "#8a7fd6" }} onClick={() => setShowQR(true)}>
-                <QrCode size={16} />
-              </button>
-            )}
+            {hasUpi && <button className="iconbtn" title="Pay this toy via UPI QR" style={{ color: "#8a7fd6" }} onClick={() => setShowQR(true)}><QrCode size={16} /></button>}
             <button className="addbtn" onClick={onAdd}><Plus size={15} /> Add</button>
           </div>
         </div>
       </div>
-
       {showQR && (
         <Modal onClose={() => setShowQR(false)}>
           <h3 style={S.modalTitle}>Pay for {p.name}</h3>
@@ -483,7 +442,7 @@ function ProductCard({ p, fav, onFav, onAdd, settings }) {
             <div style={S.qrWrap}><UpiQR value={upiString} size={210} /></div>
             <div style={S.qrHint}>Scan to pay {money(p.price)} to <b>{settings.upi_id}</b></div>
             <a className="cta full" href={upiString} style={{ textDecoration: "none" }}>Open in UPI app</a>
-            <p style={S.qrNote}>Direct UPI payment. The shop confirms receipt manually — keep your payment reference.</p>
+            <p style={S.qrNote}>Direct UPI payment. The shop confirms receipt manually.</p>
           </div>
         </Modal>
       )}
@@ -491,11 +450,9 @@ function ProductCard({ p, fav, onFav, onAdd, settings }) {
   );
 }
 
-/* ============================================================
-   ADMIN — products, UPI settings, and order confirmation
-   ============================================================ */
+/* ===================== ADMIN ===================== */
 function AdminPanel({ flash, onChanged, products, settings }) {
-  const [sub, setSub] = useState("products"); // products | settings | orders
+  const [sub, setSub] = useState("products");
   return (
     <>
       <div style={S.adminTabs}>
@@ -514,36 +471,27 @@ function AdminSettings({ flash, onChanged, settings }) {
   const [upiId, setUpiId] = useState(settings?.upi_id || "");
   const [payeeName, setPayeeName] = useState(settings?.payee_name || "");
   const [busy, setBusy] = useState(false);
-
   async function save() {
-    if (!upiId.trim()) { flash("7981166388-2@ybl"); return; }
+    if (!upiId.trim()) { flash("Enter your UPI ID"); return; }
     setBusy(true);
-    const { error } = await supabase.from("store_settings")
-      .upsert({ id: 1, upi_id: upiId.trim(), payee_name: payeeName.trim(), updated_at: new Date().toISOString() });
+    const { error } = await supabase.from("store_settings").upsert({ id: 1, upi_id: upiId.trim(), payee_name: payeeName.trim(), updated_at: new Date().toISOString() });
     setBusy(false);
-    if (error) { flash(error.message); return; }
+    if (error) { flash("Save failed: " + error.message); return; }
     flash("Payment settings saved"); onChanged();
   }
-
   return (
     <>
       <h2 style={S.sectionTitle}>Payment settings</h2>
-      <p style={S.sectionSub}>Your UPI ID is used to generate QR codes for every toy and at checkout.</p>
+      <p style={S.sectionSub}>Your UPI ID generates the QR codes for toys and checkout.</p>
       <div style={{ maxWidth: 460, display: "flex", flexDirection: "column", gap: 12 }}>
-        <div>
-          <div style={S.adminLabel}>Your UPI ID (VPA)</div>
-          <input style={{ ...S.input, width: "100%" }} placeholder="yourname@okbank" value={upiId} onChange={(e) => setUpiId(e.target.value)} />
-        </div>
-        <div>
-          <div style={S.adminLabel}>Payee name (shown in the UPI app)</div>
-          <input style={{ ...S.input, width: "100%" }} placeholder="Your shop / your name" value={payeeName} onChange={(e) => setPayeeName(e.target.value)} />
-        </div>
-        <button className="cta" disabled={busy} onClick={save}>
-          {busy ? <Loader2 className="spin" size={16} /> : <Check size={16} />} Save
-        </button>
+        <div><div style={S.adminLabel}>Your UPI ID (VPA)</div>
+          <input style={{ ...S.input, width: "100%" }} placeholder="yourname@okbank" value={upiId} onChange={(e) => setUpiId(e.target.value)} /></div>
+        <div><div style={S.adminLabel}>Payee name</div>
+          <input style={{ ...S.input, width: "100%" }} placeholder="Your shop / your name" value={payeeName} onChange={(e) => setPayeeName(e.target.value)} /></div>
+        <button className="cta" disabled={busy} onClick={save}>{busy ? <Loader2 className="spin" size={16} /> : <Check size={16} />} Save</button>
       </div>
       <div style={S.securityNote}>
-        <b>How payments work here:</b> customers pay you directly via UPI. The app cannot verify payments automatically — it shows orders as <b>pending</b> until you confirm in the Orders tab after seeing the money in your own UPI app. Never mark an order paid before you've actually received it.
+        <b>How payments work:</b> customers pay your UPI directly. The app can't auto-verify, so orders stay <b>pending</b> until you confirm in Orders after seeing the money in your UPI app. Approving an order credits that amount to the customer's wallet, which they can then spend instantly.
       </div>
     </>
   );
@@ -553,75 +501,84 @@ function AdminOrders({ flash }) {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState("pending");
+  const [workingId, setWorkingId] = useState(null);
 
   useEffect(() => { load(); }, []);
   async function load() {
     setLoading(true);
-    const { data } = await supabase.from("orders").select("*").order("created_at", { ascending: false });
-    setOrders(data || []);
-    setLoading(false);
+    const { data, error } = await supabase.from("orders").select("*").order("created_at", { ascending: false });
+    if (error) flash("Load failed: " + error.message);
+    setOrders(data || []); setLoading(false);
   }
-  async function mark(id, status) {
-    await supabase.from("orders").update({ status }).eq("id", id);
-    flash(status === "paid" ? "Marked as paid ✓" : "Marked as " + status);
-    load();
+
+  // Approve = mark paid AND credit the buyer's wallet by the order total.
+  async function approve(o) {
+    setWorkingId(o.id);
+    try {
+      const { data: prof, error: pErr } = await supabase.from("profiles").select("wallet").eq("id", o.user_id).single();
+      if (pErr) throw pErr;
+      const next = Number(prof.wallet || 0) + Number(o.total);
+      const { error: uErr } = await supabase.from("profiles").update({ wallet: next }).eq("id", o.user_id);
+      if (uErr) throw uErr;
+      await supabase.from("wallet_log").insert({ user_id: o.user_id, type: `Order #${o.id} approved`, amount: Number(o.total) });
+      const { error: oErr } = await supabase.from("orders").update({ status: "paid" }).eq("id", o.id);
+      if (oErr) throw oErr;
+      flash(`Approved · ${money(o.total)} credited to wallet ✓`);
+      load();
+    } catch (e) { flash("Approve failed: " + e.message); }
+    finally { setWorkingId(null); }
+  }
+  async function cancel(id) {
+    const { error } = await supabase.from("orders").update({ status: "cancelled" }).eq("id", id);
+    if (error) flash("Failed: " + error.message); else { flash("Cancelled"); load(); }
   }
 
   const shown = orders.filter((o) => filter === "all" ? true : o.status === filter);
-
   if (loading) return <div style={S.center}><Loader2 className="spin" size={28} color="#FF6B9D" /></div>;
 
   return (
     <>
       <h2 style={S.sectionTitle}>Orders</h2>
-      <p style={S.sectionSub}>Confirm a payment only after you see it in your UPI app, then mark it paid.</p>
+      <p style={S.sectionSub}>Confirm a payment only after you see it in your UPI app. Approving credits the buyer's wallet.</p>
       <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
         {["pending", "paid", "all"].map((f) => (
-          <button key={f} className={`subtab ${filter === f ? "subtab-on" : ""}`} onClick={() => setFilter(f)} style={{ textTransform: "capitalize" }}>{f}</button>
+          <button key={f} className={`subtab ${filter === f ? "subtab-on" : ""}`} style={{ textTransform: "capitalize" }} onClick={() => setFilter(f)}>{f}</button>
         ))}
       </div>
       {shown.length === 0 ? (
         <div style={S.empty}><ClipboardList size={30} color="#c7ccdb" /><p>No {filter === "all" ? "" : filter} orders.</p></div>
       ) : (
-        <div style={S.adminList}>
-          {shown.map((o) => (
-            <div key={o.id} style={S.orderRow}>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontWeight: 800 }}>Order #{o.id} · {money(o.total)}
-                  <span style={{ ...S.statusPill, ...(o.status === "paid" ? S.pillPaid : o.status === "cancelled" ? S.pillCancel : S.pillPending) }}>{o.status}</span>
-                </div>
-                <div style={{ fontSize: 13, color: "#9aa0b5", margin: "3px 0" }}>{prettyDateTime(o.created_at)}</div>
-                <div style={{ fontSize: 13, color: "#5b6072" }}>
-                  {(o.items || []).map((it, n) => <span key={n}>{it.name} ×{it.qty}{n < o.items.length - 1 ? ", " : ""}</span>)}
-                </div>
+        <div style={S.adminList}>{shown.map((o) => (
+          <div key={o.id} style={S.orderRow}>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: 800 }}>Order #{o.id} · {money(o.total)}
+                <span style={{ ...S.statusPill, ...(o.status === "paid" ? S.pillPaid : o.status === "cancelled" ? S.pillCancel : S.pillPending) }}>{o.status}</span>
               </div>
-              {o.status === "pending" && (
-                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                  <button className="cta" style={{ padding: "8px 14px", fontSize: 13 }} onClick={() => mark(o.id, "paid")}><Check size={14} /> Mark paid</button>
-                  <button className="ghostbtn" onClick={() => mark(o.id, "cancelled")}>Cancel</button>
-                </div>
-              )}
+              <div style={{ fontSize: 13, color: "#9aa0b5", margin: "3px 0" }}>{prettyDateTime(o.created_at)}</div>
+              <div style={{ fontSize: 13, color: "#5b6072" }}>{(o.items || []).map((it, n) => <span key={n}>{it.name} ×{it.qty}{n < o.items.length - 1 ? ", " : ""}</span>)}</div>
             </div>
-          ))}
-        </div>
+            {o.status === "pending" && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                <button className="cta" style={{ padding: "8px 14px", fontSize: 13 }} disabled={workingId === o.id} onClick={() => approve(o)}>
+                  {workingId === o.id ? <Loader2 className="spin" size={14} /> : <Check size={14} />} Approve & credit
+                </button>
+                <button className="ghostbtn" onClick={() => cancel(o.id)}>Cancel</button>
+              </div>
+            )}
+          </div>
+        ))}</div>
       )}
     </>
   );
 }
 
 function AdminProducts({ flash, onChanged, products }) {
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
-  const [price, setPrice] = useState("");
-  const [category, setCategory] = useState("");
-  const [emoji, setEmoji] = useState("🎁");
-  const [rating, setRating] = useState("4.5");
-  const [ageRange, setAgeRange] = useState("");
-  const [tags, setTags] = useState([]);
-  const [file, setFile] = useState(null);
-  const [busy, setBusy] = useState(false);
+  const [name, setName] = useState(""); const [description, setDescription] = useState("");
+  const [price, setPrice] = useState(""); const [category, setCategory] = useState("");
+  const [emoji, setEmoji] = useState("🎁"); const [rating, setRating] = useState("4.5");
+  const [ageRange, setAgeRange] = useState(""); const [tags, setTags] = useState([]);
+  const [file, setFile] = useState(null); const [busy, setBusy] = useState(false);
   const ALL_TAGS = ["fun", "celebration", "baby", "soft", "milestone", "learning", "festive"];
-
   function toggleTag(t) { setTags((c) => c.includes(t) ? c.filter((x) => x !== t) : [...c, t]); }
 
   async function save() {
@@ -634,8 +591,7 @@ function AdminProducts({ flash, onChanged, products }) {
         const path = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
         const { error: upErr } = await supabase.storage.from("product-images").upload(path, file, { upsert: false });
         if (upErr) throw upErr;
-        const { data } = supabase.storage.from("product-images").getPublicUrl(path);
-        image_url = data.publicUrl;
+        image_url = supabase.storage.from("product-images").getPublicUrl(path).data.publicUrl;
       }
       const { error } = await supabase.from("products").insert({
         name: name.trim(), description: description.trim() || null, price: Number(price),
@@ -646,10 +602,13 @@ function AdminProducts({ flash, onChanged, products }) {
       flash("Toy added! 🎉");
       setName(""); setDescription(""); setPrice(""); setCategory(""); setEmoji("🎁"); setRating("4.5"); setAgeRange(""); setTags([]); setFile(null);
       onChanged();
-    } catch (e) { flash(e.message || "Something went wrong"); }
+    } catch (e) { flash("Add failed: " + e.message); }
     finally { setBusy(false); }
   }
-  async function deleteProduct(id) { await supabase.from("products").delete().eq("id", id); flash("Removed"); onChanged(); }
+  async function deleteProduct(id) {
+    const { error } = await supabase.from("products").delete().eq("id", id);
+    if (error) flash("Delete failed: " + error.message); else { flash("Removed"); onChanged(); }
+  }
 
   return (
     <>
@@ -664,39 +623,24 @@ function AdminProducts({ flash, onChanged, products }) {
         <input style={S.input} type="number" step="0.1" min="0" max="5" placeholder="Rating 0-5" value={rating} onChange={(e) => setRating(e.target.value)} />
       </div>
       <div style={{ margin: "0 0 12px" }}>
-        <textarea style={{ ...S.input, width: "100%", minHeight: 90, resize: "vertical" }}
-          placeholder="Description — what makes this toy special?" value={description} onChange={(e) => setDescription(e.target.value)} />
+        <textarea style={{ ...S.input, width: "100%", minHeight: 90, resize: "vertical" }} placeholder="Description — what makes this toy special?" value={description} onChange={(e) => setDescription(e.target.value)} />
       </div>
-      <div style={{ margin: "4px 0 16px" }}>
-        <div style={S.adminLabel}>Occasion tags</div>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          {ALL_TAGS.map((t) => (
-            <button key={t} onClick={() => toggleTag(t)} className={`tagchip ${tags.includes(t) ? "tagchip-on" : ""}`}>{t}</button>
-          ))}
-        </div>
-      </div>
-      <div style={{ margin: "4px 0 18px" }}>
-        <div style={S.adminLabel}>Photo (optional)</div>
-        <input type="file" accept="image/*" onChange={(e) => setFile(e.target.files?.[0] || null)} />
-      </div>
-      <button className="cta" disabled={busy} onClick={save}>
-        {busy ? <Loader2 className="spin" size={16} /> : <Plus size={16} />} Add toy
-      </button>
+      <div style={{ margin: "4px 0 16px" }}><div style={S.adminLabel}>Occasion tags</div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>{ALL_TAGS.map((t) => (
+          <button key={t} onClick={() => toggleTag(t)} className={`tagchip ${tags.includes(t) ? "tagchip-on" : ""}`}>{t}</button>))}</div></div>
+      <div style={{ margin: "4px 0 18px" }}><div style={S.adminLabel}>Photo (optional)</div>
+        <input type="file" accept="image/*" onChange={(e) => setFile(e.target.files?.[0] || null)} /></div>
+      <button className="cta" disabled={busy} onClick={save}>{busy ? <Loader2 className="spin" size={16} /> : <Plus size={16} />} Add toy</button>
 
       <h3 style={S.subhead}>Current toys ({products.length})</h3>
       <div style={S.adminList}>
-        {products.length === 0 && (
-          <div style={S.empty}><Package size={28} color="#c7ccdb" /><p>No toys yet. Add your first above.</p></div>
-        )}
+        {products.length === 0 && <div style={S.empty}><Package size={28} color="#c7ccdb" /><p>No toys yet. Add your first above.</p></div>}
         {products.map((p) => (
           <div key={p.id} style={S.adminRow}>
             <div className="cartArt" style={{ fontSize: 26, width: 46, height: 46 }}>
               {p.image_url ? <img src={p.image_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: 12 }} /> : p.emoji}
             </div>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontWeight: 800 }}>{p.name}</div>
-              <div style={{ fontSize: 13, color: "#9aa0b5" }}>{money(p.price)} · {p.category}</div>
-            </div>
+            <div style={{ flex: 1 }}><div style={{ fontWeight: 800 }}>{p.name}</div><div style={{ fontSize: 13, color: "#9aa0b5" }}>{money(p.price)} · {p.category}</div></div>
             <button className="iconbtn" onClick={() => deleteProduct(p.id)}><Trash2 size={16} /></button>
           </div>
         ))}
@@ -706,20 +650,15 @@ function AdminProducts({ flash, onChanged, products }) {
 }
 
 function RemindersPanel({ userId, reminders, setReminders, flash, onShop }) {
-  const [title, setTitle] = useState("");
-  const [date, setDate] = useState("");
-  const [occ, setOcc] = useState("birthday");
-
+  const [title, setTitle] = useState(""); const [date, setDate] = useState(""); const [occ, setOcc] = useState("birthday");
   async function add() {
     if (!title.trim() || !date) { flash("Add a name and a date"); return; }
-    const { data, error } = await supabase.from("reminders")
-      .insert({ user_id: userId, title: title.trim(), remind_date: date, occasion: occ }).select().single();
+    const { data, error } = await supabase.from("reminders").insert({ user_id: userId, title: title.trim(), remind_date: date, occasion: occ }).select().single();
     if (error) { flash(error.message); return; }
     setReminders((r) => [...r, data].sort((a, b) => a.remind_date.localeCompare(b.remind_date)));
     setTitle(""); setDate(""); flash("Reminder saved 🔔");
   }
   async function remove(id) { setReminders((r) => r.filter((x) => x.id !== id)); await supabase.from("reminders").delete().eq("id", id); }
-
   return (
     <>
       <h2 style={S.sectionTitle}>Gift reminders</h2>
@@ -727,25 +666,18 @@ function RemindersPanel({ userId, reminders, setReminders, flash, onShop }) {
       <div style={S.reminderForm}>
         <input style={S.input} placeholder="Whose moment? e.g. Dad's birthday" value={title} onChange={(e) => setTitle(e.target.value)} />
         <input style={S.input} type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-        <select style={S.input} value={occ} onChange={(e) => setOcc(e.target.value)}>
-          {OCCASIONS.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
-        </select>
+        <select style={S.input} value={occ} onChange={(e) => setOcc(e.target.value)}>{OCCASIONS.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}</select>
         <button className="cta" onClick={add}><Plus size={16} /> Add reminder</button>
       </div>
       <div style={S.reminderList}>
-        {reminders.length === 0 && (
-          <div style={S.empty}><Bell size={28} color="#c7ccdb" /><p>No reminders yet. Add your first above.</p></div>
-        )}
+        {reminders.length === 0 && <div style={S.empty}><Bell size={28} color="#c7ccdb" /><p>No reminders yet. Add your first above.</p></div>}
         {reminders.map((r) => {
-          const o = OCCASIONS.find((x) => x.id === r.occasion) || OCCASIONS[0];
-          const days = daysUntil(r.remind_date);
+          const o = OCCASIONS.find((x) => x.id === r.occasion) || OCCASIONS[0]; const days = daysUntil(r.remind_date);
           return (
             <div key={r.id} className="reminderCard">
               <span style={{ ...S.occIcon, background: o.hue + "22", color: o.hue }}><o.icon size={20} /></span>
-              <div style={{ flex: 1 }}>
-                <div style={S.reminderTitle}>{r.title}</div>
-                <div style={S.reminderMeta}>{prettyDate(r.remind_date)} · {days < 0 ? "passed" : days === 0 ? "today!" : `in ${days} day${days > 1 ? "s" : ""}`}</div>
-              </div>
+              <div style={{ flex: 1 }}><div style={S.reminderTitle}>{r.title}</div>
+                <div style={S.reminderMeta}>{prettyDate(r.remind_date)} · {days < 0 ? "passed" : days === 0 ? "today!" : `in ${days} day${days > 1 ? "s" : ""}`}</div></div>
               <button className="ghostbtn" onClick={() => onShop(r.occasion)}>Find gifts</button>
               <button className="iconbtn" onClick={() => remove(r.id)} aria-label="delete"><Trash2 size={16} /></button>
             </div>
@@ -760,85 +692,57 @@ function WalletPanel({ wallet, log, onTopUp }) {
   return (
     <>
       <h2 style={S.sectionTitle}>Your wallet</h2>
-      <p style={S.sectionSub}>Store credit you can use at checkout. (Top-ups here are store credit, separate from UPI payments.)</p>
+      <p style={S.sectionSub}>Balance updates live. Approved orders are credited here; spend it for instant checkout.</p>
       <div style={S.walletCard}>
         <div style={S.walletGlow} />
         <div style={S.walletLabel}><CreditCard size={16} /> Balance</div>
         <div style={S.walletBalance}>{money(wallet)}</div>
-        <div style={S.topUpRow}>
-          {[25, 50, 100].map((a) => <button key={a} className="topup" onClick={() => onTopUp(a)}>+ {money(a)}</button>)}
-        </div>
+        <div style={S.topUpRow}>{[25, 50, 100].map((a) => <button key={a} className="topup" onClick={() => onTopUp(a)}>+ {money(a)}</button>)}</div>
       </div>
       <h3 style={S.subhead}>Activity</h3>
-      <div style={S.logList}>
-        {log.map((e) => (
-          <div key={e.id} style={S.logRow}>
-            <div><div style={S.logType}>{e.type}</div><div style={S.logWhen}>{prettyDateTime(e.created_at)}</div></div>
-            <div style={{ ...S.logAmt, color: e.amount < 0 ? "#e5484d" : "#1faa6b" }}>{e.amount < 0 ? "-" : "+"}{money(Math.abs(e.amount))}</div>
-          </div>
-        ))}
-      </div>
+      <div style={S.logList}>{log.map((e) => (
+        <div key={e.id} style={S.logRow}>
+          <div><div style={S.logType}>{e.type}</div><div style={S.logWhen}>{prettyDateTime(e.created_at)}</div></div>
+          <div style={{ ...S.logAmt, color: e.amount < 0 ? "#e5484d" : "#1faa6b" }}>{e.amount < 0 ? "-" : "+"}{money(Math.abs(e.amount))}</div>
+        </div>
+      ))}</div>
     </>
   );
 }
 
-function CartPanel({ items, subtotal, onQty, onRemove, onCheckout, onShop }) {
+function CartPanel({ items, subtotal, wallet, onQty, onRemove, onCheckout, onWalletPay, onShop }) {
   if (items.length === 0)
-    return (
-      <div style={S.empty}>
-        <ShoppingCart size={32} color="#c7ccdb" /><p>Your cart is empty.</p>
-        <button className="cta" onClick={onShop}>Start shopping</button>
-      </div>
-    );
+    return <div style={S.empty}><ShoppingCart size={32} color="#c7ccdb" /><p>Your cart is empty.</p><button className="cta" onClick={onShop}>Start shopping</button></div>;
+  const canWallet = wallet >= subtotal && subtotal > 0;
   return (
     <>
       <h2 style={S.sectionTitle}>Your cart</h2>
-      <div style={S.cartList}>
-        {items.map((i) => (
-          <div key={i.id} className="cartRow">
-            <div className="cartArt">
-              {i.image_url ? <img src={i.image_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: 14 }} /> : i.emoji}
-            </div>
-            <div style={{ flex: 1 }}>
-              <div style={S.cardName}>{i.name}</div>
-              <div style={S.cardMeta}>{money(i.price)} each</div>
-            </div>
-            <div style={S.qtyBox}>
-              <button className="qtybtn" onClick={() => onQty(i.id, -1)}><Minus size={14} /></button>
-              <span style={S.qty}>{i.qty}</span>
-              <button className="qtybtn" onClick={() => onQty(i.id, 1)}><Plus size={14} /></button>
-            </div>
-            <div style={S.lineTotal}>{money(i.price * i.qty)}</div>
-            <button className="iconbtn" onClick={() => onRemove(i.id)}><X size={16} /></button>
-          </div>
-        ))}
-      </div>
+      <div style={S.cartList}>{items.map((i) => (
+        <div key={i.id} className="cartRow">
+          <div className="cartArt">{i.image_url ? <img src={i.image_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: 14 }} /> : i.emoji}</div>
+          <div style={{ flex: 1 }}><div style={S.cardName}>{i.name}</div><div style={S.cardMeta}>{money(i.price)} each</div></div>
+          <div style={S.qtyBox}><button className="qtybtn" onClick={() => onQty(i.id, -1)}><Minus size={14} /></button><span style={S.qty}>{i.qty}</span><button className="qtybtn" onClick={() => onQty(i.id, 1)}><Plus size={14} /></button></div>
+          <div style={S.lineTotal}>{money(i.price * i.qty)}</div>
+          <button className="iconbtn" onClick={() => onRemove(i.id)}><X size={16} /></button>
+        </div>
+      ))}</div>
       <div style={S.summary}>
         <div style={S.sumLine}><span>Subtotal</span><span>{money(subtotal)}</span></div>
         <div style={S.sumLine}><span>Shipping</span><span style={{ color: "#1faa6b" }}>Free</span></div>
         <div style={{ ...S.sumLine, ...S.sumTotal }}><span>Total</span><span>{money(subtotal)}</span></div>
-        <button className="cta full" onClick={onCheckout}>Checkout with UPI <ArrowRight size={16} /></button>
+        <div style={S.walletNote}><Wallet size={14} /> Wallet: {money(wallet)}</div>
+        {canWallet && <button className="cta full" style={{ marginBottom: 10 }} onClick={onWalletPay}><Zap size={16} /> Pay from wallet</button>}
+        <button className="ghostbtn" style={{ width: "100%", padding: 13 }} onClick={onCheckout}>Checkout with UPI <ArrowRight size={14} /></button>
       </div>
     </>
   );
 }
 
 function Modal({ children, onClose }) {
-  return (
-    <div className="overlay" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <button className="iconbtn modalClose" onClick={onClose}><X size={18} /></button>
-        {children}
-      </div>
-    </div>
-  );
+  return <div className="overlay" onClick={onClose}><div className="modal" onClick={(e) => e.stopPropagation()}><button className="iconbtn modalClose" onClick={onClose}><X size={18} /></button>{children}</div></div>;
 }
 
-function daysUntil(dateStr) {
-  const today = new Date(); today.setHours(0, 0, 0, 0);
-  const d = new Date(dateStr); d.setHours(0, 0, 0, 0);
-  return Math.round((d - today) / 86400000);
-}
+function daysUntil(s) { const t = new Date(); t.setHours(0,0,0,0); const d = new Date(s); d.setHours(0,0,0,0); return Math.round((d - t) / 86400000); }
 function prettyDate(s) { return new Date(s).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }); }
 function prettyDateTime(s) { return new Date(s).toLocaleDateString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }); }
 
@@ -852,11 +756,9 @@ const S = {
   authMsg: { fontSize: 13, color: "#5b6072", textAlign: "center", background: "#f9f6f1", padding: "10px 12px", borderRadius: 10, fontWeight: 600 },
   authSwitch: { fontSize: 13.5, color: "#7a7f93", textAlign: "center", fontWeight: 600 },
   header: { display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 28px", background: "#fff", borderBottom: "1px solid #efe9e1", position: "sticky", top: 0, zIndex: 50, flexWrap: "wrap", gap: 12 },
-  brand: { display: "flex", alignItems: "center", gap: 12 },
-  logoMark: { fontSize: 32 },
-  brandName: { fontWeight: 900, fontSize: 22, letterSpacing: "0.04em" },
-  brandTag: { fontSize: 11, color: "#9aa0b5", fontWeight: 600 },
-  nav: { display: "flex", alignItems: "center", gap: 6 },
+  brand: { display: "flex", alignItems: "center", gap: 12 }, logoMark: { fontSize: 32 },
+  brandName: { fontWeight: 900, fontSize: 22, letterSpacing: "0.04em" }, brandTag: { fontSize: 11, color: "#9aa0b5", fontWeight: 600 },
+  nav: { display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" },
   main: { maxWidth: 1100, margin: "0 auto", padding: "28px 20px 60px" },
   hero: { display: "flex", gap: 24, alignItems: "center", background: "linear-gradient(120deg,#FFE8F0,#EAF0FF)", borderRadius: 28, padding: "40px 36px", marginBottom: 28, overflow: "hidden", flexWrap: "wrap" },
   heroInner: { flex: "1 1 320px" },
@@ -887,8 +789,7 @@ const S = {
   reminderForm: { display: "grid", gridTemplateColumns: "2fr 1fr 1fr auto", gap: 10, marginBottom: 24 },
   input: { padding: "11px 14px", borderRadius: 12, border: "1px solid #e6e0d7", fontSize: 14, fontFamily: "inherit", outline: "none", background: "#fff" },
   reminderList: { display: "flex", flexDirection: "column", gap: 12 },
-  reminderTitle: { fontWeight: 800, fontSize: 16 },
-  reminderMeta: { fontSize: 13, color: "#9aa0b5", fontWeight: 600 },
+  reminderTitle: { fontWeight: 800, fontSize: 16 }, reminderMeta: { fontSize: 13, color: "#9aa0b5", fontWeight: 600 },
   adminTabs: { display: "flex", gap: 8, marginBottom: 24, flexWrap: "wrap" },
   adminForm: { display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))", gap: 10, marginBottom: 8 },
   adminLabel: { fontSize: 13, fontWeight: 800, color: "#5b6072", marginBottom: 8 },
@@ -896,9 +797,7 @@ const S = {
   adminRow: { display: "flex", alignItems: "center", gap: 14, background: "#fff", border: "1px solid #efe9e1", borderRadius: 14, padding: 12 },
   orderRow: { display: "flex", alignItems: "flex-start", gap: 14, background: "#fff", border: "1px solid #efe9e1", borderRadius: 14, padding: 16 },
   statusPill: { fontSize: 11, fontWeight: 800, padding: "3px 9px", borderRadius: 999, marginLeft: 10, textTransform: "uppercase", letterSpacing: "0.03em" },
-  pillPending: { background: "#fff4e5", color: "#FFB454" },
-  pillPaid: { background: "#e7f7ef", color: "#1faa6b" },
-  pillCancel: { background: "#fff1f0", color: "#e5484d" },
+  pillPending: { background: "#fff4e5", color: "#FFB454" }, pillPaid: { background: "#e7f7ef", color: "#1faa6b" }, pillCancel: { background: "#fff1f0", color: "#e5484d" },
   securityNote: { marginTop: 24, background: "#fff8f0", border: "1px solid #ffe3c2", borderRadius: 14, padding: 16, fontSize: 13.5, color: "#7a5a2e", lineHeight: 1.55, maxWidth: 560 },
   qrWrap: { display: "inline-flex", padding: 14, background: "#fff", border: "1px solid #efe9e1", borderRadius: 18, marginBottom: 12 },
   qrHint: { fontSize: 14, color: "#5b6072", marginBottom: 14, fontWeight: 600 },
@@ -910,9 +809,7 @@ const S = {
   topUpRow: { display: "flex", gap: 10 },
   logList: { display: "flex", flexDirection: "column", gap: 2, maxWidth: 520 },
   logRow: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "13px 4px", borderBottom: "1px solid #efe9e1" },
-  logType: { fontWeight: 700, fontSize: 14.5 },
-  logWhen: { fontSize: 12, color: "#9aa0b5" },
-  logAmt: { fontWeight: 800, fontSize: 15 },
+  logType: { fontWeight: 700, fontSize: 14.5 }, logWhen: { fontSize: 12, color: "#9aa0b5" }, logAmt: { fontWeight: 800, fontSize: 15 },
   cartList: { display: "flex", flexDirection: "column", gap: 12, marginBottom: 24 },
   qtyBox: { display: "flex", alignItems: "center", gap: 6, background: "#f4f0ea", borderRadius: 10, padding: 4 },
   qty: { fontWeight: 800, minWidth: 22, textAlign: "center" },
@@ -920,6 +817,7 @@ const S = {
   summary: { background: "#fff", border: "1px solid #efe9e1", borderRadius: 20, padding: 24, maxWidth: 400, marginLeft: "auto" },
   sumLine: { display: "flex", justifyContent: "space-between", fontSize: 15, padding: "7px 0", color: "#5b6072", fontWeight: 600 },
   sumTotal: { borderTop: "1px solid #efe9e1", marginTop: 8, paddingTop: 14, fontSize: 19, fontWeight: 900, color: "#26283d" },
+  walletNote: { display: "flex", alignItems: "center", gap: 7, fontSize: 13, color: "#7a7f93", fontWeight: 700, margin: "12px 0 16px" },
   empty: { textAlign: "center", padding: "70px 20px", color: "#9aa0b5", display: "flex", flexDirection: "column", alignItems: "center", gap: 14 },
   modalTitle: { fontSize: 22, fontWeight: 900, margin: "0 0 18px" },
   checkoutRows: { display: "flex", flexDirection: "column", gap: 8, marginBottom: 18 },
@@ -927,27 +825,24 @@ const S = {
   payBox: { background: "#f9f6f1", borderRadius: 14, padding: 16, marginBottom: 18 },
   payLine: { display: "flex", justifyContent: "space-between", fontSize: 14, padding: "5px 0", color: "#5b6072", fontWeight: 600 },
   payTotal: { fontWeight: 900, fontSize: 17, color: "#26283d" },
-  warn: { background: "#fff1f0", color: "#e5484d", padding: "12px 16px", borderRadius: 12, fontSize: 14, fontWeight: 700, textAlign: "center" },
+  warn: { background: "#fff1f0", color: "#e5484d", padding: "12px 16px", borderRadius: 12, fontSize: 14, fontWeight: 700, textAlign: "center", marginBottom: 12 },
   footer: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "20px 28px", borderTop: "1px solid #efe9e1", fontSize: 13, fontWeight: 700, color: "#5b6072", flexWrap: "wrap", gap: 8 },
 };
 
 const CSS = `
 @import url('https://fonts.googleapis.com/css2?family=Nunito:wght@600;700;800;900&display=swap');
-* { box-sizing: border-box; }
-body { margin: 0; }
+* { box-sizing: border-box; } body { margin: 0; }
 .navbtn { display:inline-flex; align-items:center; gap:6px; border:none; background:transparent; font-family:inherit; font-weight:800; font-size:14px; color:#7a7f93; padding:9px 14px; border-radius:11px; cursor:pointer; transition:.15s; }
-.navbtn:hover { background:#f4f0ea; color:#26283d; }
-.navbtn-on { background:#FFE8F0; color:#FF6B9D; }
+.navbtn:hover { background:#f4f0ea; color:#26283d; } .navbtn-on { background:#FFE8F0; color:#FF6B9D; }
+.walletchip { display:inline-flex; align-items:center; gap:6px; border:2px solid #e7f0ff; background:#f3f7ff; color:#6C8EFF; font-family:inherit; font-weight:900; font-size:13.5px; padding:8px 13px; border-radius:11px; cursor:pointer; transition:.15s; }
+.walletchip:hover { border-color:#6C8EFF; }
 .subtab { display:inline-flex; align-items:center; gap:6px; border:2px solid #efe9e1; background:#fff; font-family:inherit; font-weight:800; font-size:13.5px; color:#7a7f93; padding:9px 16px; border-radius:12px; cursor:pointer; transition:.15s; }
-.subtab:hover { border-color:#FF6B9D; color:#FF6B9D; }
-.subtab-on { background:#FFE8F0; border-color:#FF6B9D; color:#FF6B9D; }
+.subtab:hover { border-color:#FF6B9D; color:#FF6B9D; } .subtab-on { background:#FFE8F0; border-color:#FF6B9D; color:#FF6B9D; }
 .cartbtn { position:relative; border:none; background:#26283d; color:#fff; width:42px; height:42px; border-radius:12px; display:inline-flex; align-items:center; justify-content:center; cursor:pointer; transition:.15s; }
 .cartbtn:hover { transform:translateY(-2px); }
 .badge { position:absolute; top:-6px; right:-6px; background:#FF6B9D; color:#fff; font-size:11px; font-weight:900; min-width:19px; height:19px; border-radius:999px; display:flex; align-items:center; justify-content:center; padding:0 4px; }
 .cta { display:inline-flex; align-items:center; gap:8px; background:#FF6B9D; color:#fff; border:none; font-family:inherit; font-weight:900; font-size:15px; padding:13px 22px; border-radius:14px; cursor:pointer; transition:.18s; box-shadow:0 6px 18px rgba(255,107,157,.32); }
-.cta:hover { transform:translateY(-2px); box-shadow:0 10px 24px rgba(255,107,157,.4); }
-.cta:disabled { opacity:.6; cursor:default; transform:none; }
-.cta.full { width:100%; justify-content:center; }
+.cta:hover { transform:translateY(-2px); box-shadow:0 10px 24px rgba(255,107,157,.4); } .cta:disabled { opacity:.6; cursor:default; transform:none; } .cta.full { width:100%; justify-content:center; }
 .linkbtn { background:none; border:none; color:#FF6B9D; font-family:inherit; font-weight:800; font-size:13.5px; cursor:pointer; padding:0; }
 .card { position:relative; background:#fff; border:1px solid #efe9e1; border-radius:20px; overflow:hidden; transition:.2s; }
 .card:hover { transform:translateY(-5px); box-shadow:0 16px 34px rgba(40,40,70,.1); border-color:#f3d9e4; }
@@ -955,8 +850,7 @@ body { margin: 0; }
 .cardImg { width:100%; height:140px; object-fit:cover; display:block; margin:-26px 0 -18px; }
 .cartArt { font-size:40px; width:64px; height:64px; display:flex; align-items:center; justify-content:center; background:#f7f3fb; border-radius:14px; overflow:hidden; }
 .favbtn { position:absolute; top:12px; right:12px; z-index:2; border:none; background:rgba(255,255,255,.9); width:32px; height:32px; border-radius:50%; display:flex; align-items:center; justify-content:center; cursor:pointer; color:#c7ccdb; transition:.15s; }
-.favbtn:hover { transform:scale(1.12); }
-.favon { color:#FF6B9D; }
+.favbtn:hover { transform:scale(1.12); } .favon { color:#FF6B9D; }
 .addbtn { display:inline-flex; align-items:center; gap:4px; background:#26283d; color:#fff; border:none; font-family:inherit; font-weight:800; font-size:13px; padding:8px 14px; border-radius:10px; cursor:pointer; transition:.15s; }
 .addbtn:hover { background:#FF6B9D; }
 .occchip { display:inline-flex; align-items:center; gap:10px; background:#fff; border:2px solid #efe9e1; font-family:inherit; font-weight:800; font-size:15px; color:#26283d; padding:10px 18px 10px 10px; border-radius:16px; cursor:pointer; transition:.15s; }
@@ -964,10 +858,9 @@ body { margin: 0; }
 .topup { background:rgba(255,255,255,.22); color:#fff; border:1.5px solid rgba(255,255,255,.5); font-family:inherit; font-weight:800; font-size:14px; padding:9px 16px; border-radius:11px; cursor:pointer; transition:.15s; }
 .topup:hover { background:#fff; color:#6C8EFF; }
 .tagchip { background:#fff; border:2px solid #efe9e1; font-family:inherit; font-weight:800; font-size:13px; color:#7a7f93; padding:7px 14px; border-radius:999px; cursor:pointer; transition:.15s; text-transform:capitalize; }
-.tagchip:hover { border-color:#FF6B9D; color:#FF6B9D; }
-.tagchip-on { background:#FFE8F0; border-color:#FF6B9D; color:#FF6B9D; }
+.tagchip:hover { border-color:#FF6B9D; color:#FF6B9D; } .tagchip-on { background:#FFE8F0; border-color:#FF6B9D; color:#FF6B9D; }
 .reminderCard { display:flex; align-items:center; gap:14px; background:#fff; border:1px solid #efe9e1; border-radius:16px; padding:14px 16px; }
-.ghostbtn { background:#f4f0ea; border:none; font-family:inherit; font-weight:800; font-size:13px; color:#26283d; padding:8px 14px; border-radius:10px; cursor:pointer; transition:.15s; }
+.ghostbtn { display:inline-flex; align-items:center; justify-content:center; gap:6px; background:#f4f0ea; border:none; font-family:inherit; font-weight:800; font-size:13px; color:#26283d; padding:8px 14px; border-radius:10px; cursor:pointer; transition:.15s; }
 .ghostbtn:hover { background:#FFE8F0; color:#FF6B9D; }
 .iconbtn { background:transparent; border:none; color:#c7ccdb; cursor:pointer; padding:7px; border-radius:9px; display:inline-flex; transition:.15s; }
 .iconbtn:hover { background:#fff1f0; color:#e5484d; }
@@ -979,10 +872,8 @@ body { margin: 0; }
 .modalClose { position:absolute; top:16px; right:16px; }
 .toast { position:fixed; bottom:26px; left:50%; transform:translateX(-50%); background:#26283d; color:#fff; font-weight:800; font-size:14px; padding:13px 22px; border-radius:14px; z-index:200; box-shadow:0 12px 30px rgba(0,0,0,.25); animation:pop .25s ease; max-width:90vw; text-align:center; }
 @keyframes pop { from { transform:translate(-50%,12px); opacity:0; } to { transform:translate(-50%,0); opacity:1; } }
-.float { animation:floaty 3s ease-in-out infinite; }
-@keyframes floaty { 0%,100% { transform:translateY(0); } 50% { transform:translateY(-10px); } }
-.spin { animation:spin 1s linear infinite; }
-@keyframes spin { to { transform:rotate(360deg); } }
+.float { animation:floaty 3s ease-in-out infinite; } @keyframes floaty { 0%,100% { transform:translateY(0); } 50% { transform:translateY(-10px); } }
+.spin { animation:spin 1s linear infinite; } @keyframes spin { to { transform:rotate(360deg); } }
 @media (max-width:640px) { .navbtn span, .navbtn { font-size:0; padding:9px; } .navbtn svg { width:20px; height:20px; } }
 @media (max-width:680px) { div[style*="grid-template-columns: 2fr 1fr 1fr auto"] { grid-template-columns:1fr !important; } }
 @media (prefers-reduced-motion: reduce) { .float, .toast, .spin { animation:none; } * { transition:none !important; } }
