@@ -187,6 +187,7 @@ function Store({ session }) {
   const [detailProduct, setDetailProduct] = useState(null);
   const [rechargeOpen, setRechargeOpen] = useState(false);
   const [myOrders, setMyOrders] = useState([]);
+  const [profile, setProfile] = useState({ full_name: "", phone: "", address: "" });  
 
   function flash(m) { setToast(m); setTimeout(() => setToast(null), 2800); }
 
@@ -203,7 +204,7 @@ function Store({ session }) {
     setLoading(true);
     const [prod, prof, log, c, rem, setg, myord] = await Promise.all([
       supabase.from("products").select("*, product_images(*)").order("created_at", { ascending: false }),
-      supabase.from("profiles").select("wallet").eq("id", userId).single(),
+      supabase.from("profiles").select("wallet, full_name, phone, address").eq("id", userId).single(),
       supabase.from("wallet_log").select("*").eq("user_id", userId).order("created_at", { ascending: false }),
       supabase.from("cart_items").select("*").eq("user_id", userId),
       supabase.from("reminders").select("*").eq("user_id", userId).order("remind_date"),
@@ -212,6 +213,7 @@ function Store({ session }) {
     ]);
     setProducts(prod.data || []);
     setWallet(prof.data?.wallet ?? 0);
+    setProfile({ full_name: prof.data?.full_name || "", phone: prof.data?.phone || "", address: prof.data?.address || "" });
     setWalletLog(log.data || []);
     setCart((c.data || []).map((r) => ({ product_id: r.product_id, qty: r.qty })));
     setReminders(rem.data || []);
@@ -255,6 +257,13 @@ function Store({ session }) {
     if (error) { flash(error.message); return; }
     await supabase.from("cart_items").delete().eq("user_id", userId);
     setCart([]); setCheckoutOpen(false); flash("Paid from wallet 🎉"); loadAll(); setTab("orders");
+  }
+
+  async function saveProfile(p) {
+    const { error } = await supabase.from("profiles").update({ full_name: p.full_name, phone: p.phone, address: p.address }).eq("id", userId);
+    if (error) { flash("Address save failed: " + error.message); return false; }
+    setProfile(p); flash("Delivery details saved"); return true;
+  }
   }
 
   if (loading) return <div style={S.center}><Loader2 className="spin" size={32} color="#C1432E" /></div>;
@@ -355,8 +364,8 @@ function Store({ session }) {
         {tab === "design" && <DesignStudio flash={flash} />}
         {tab === "orders" && <MyOrders orders={myOrders} onShop={() => setTab("shop")} />}
         {tab === "calendar" && <RemindersPanel userId={userId} reminders={reminders} setReminders={setReminders} flash={flash} onShop={(occ) => { setActiveOcc(occ); setTab("occasions"); }} />}
-        {tab === "wallet" && <WalletPanel wallet={wallet} log={walletLog} onRecharge={() => setRechargeOpen(true)} hasUpi={!!settings?.upi_id?.trim()} orders={myOrders} />}
-        {tab === "cart" && <CartPanel items={cartDetailed} subtotal={subtotal} wallet={wallet} onSetQty={setItemQty} onCheckout={() => setCheckoutOpen(true)} onWalletPay={payWithWallet} onShop={() => setTab("shop")} />}
+        {tab === "wallet" && <WalletPanel wallet={wallet} log={walletLog} onRecharge={() => setRechargeOpen(true)} hasUpi={!!settings?.upi_id?.trim()} orders={myOrders} profile={profile} onSaveProfile={saveProfile} />}
+        {tab === "cart" && <CartPanel items={cartDetailed} subtotal={subtotal} wallet={wallet} onSetQty={setItemQty} onCheckout={() => setCheckoutOpen(true)} onWalletPay={payWithWallet} onShop={() => setTab("shop")} hasAddress={!!profile.address?.trim()} onNeedAddress={() => setTab("wallet")} />}
         {tab === "admin" && isAdmin && <AdminPanel flash={flash} onChanged={loadAll} products={products} settings={settings} />}
       </main>
 
@@ -503,7 +512,7 @@ function AIAssistant({ products, onClose }) {
     const next = [...messages, { role: "user", content: text }];
     setMessages(next); setInput(""); setBusy(true);
     try {
-      const { data, error } = await supabase.functions.invoke("ai-assistant", { body: { messages: next, products: products.map((p) => ({ name: p.name, price: p.price, category: p.category, age_range: p.age_range, description: p.description })) } });
+      const { data, error } = await supabase.from("orders").insert({ user_id: userId, total: subtotal, items, status: "pending", ship_name: profile.full_name, ship_phone: profile.phone, ship_address: profile.address }).select().single();
       if (error) throw error;
       setMessages((m) => [...m, { role: "assistant", content: data.text || "Sorry, I couldn't respond." }]);
     } catch { setMessages((m) => [...m, { role: "assistant", content: "I'm having trouble connecting right now. Please try again." }]); }
@@ -700,7 +709,7 @@ function AdminSettings({ flash, onChanged, settings }) {
   const [logoUrl, setLogoUrl] = useState(settings?.logo_url || "");
   const [logoBusy, setLogoBusy] = useState(false);
   async function save() {
-    if (!upiId.trim()) { flash("Enter your UPI ID"); return; }
+    if (!upiId.trim()) { flash("7981166388-2@ybl"); return; }
     setBusy(true);
     const { error } = await supabase.from("store_settings").upsert({
       id: 1, upi_id: upiId.trim(), payee_name: payeeName.trim(),
@@ -787,6 +796,8 @@ function AdminOrders({ flash }) {
               <div style={{ fontWeight: 800 }}>Order #{o.id} · {money(o.total)}<span style={{ ...S.statusPill, ...(o.status === "paid" ? S.pillPaid : o.status === "cancelled" ? S.pillCancel : S.pillPending) }}>{o.status}</span></div>
               <div style={{ fontSize: 13, color: "#9a8da5", margin: "3px 0" }}>{prettyDateTime(o.created_at)}</div>
               <div style={{ fontSize: 13, color: "#5b5066" }}>{(o.items || []).map((it, n) => <span key={n}>{it.name} ×{it.qty}{n < o.items.length - 1 ? ", " : ""}</span>)}</div>
+              {o.ship_address && <div style={S.shipBox}><b>Ship to:</b> {o.ship_name}{o.ship_phone ? ` · ${o.ship_phone}` : ""}<br/>{o.ship_address}</div>}
+            </div>
             </div>
             {o.status === "pending" && <div style={{ display: "flex", flexDirection: "column", gap: 6 }}><button className="cta" style={{ padding: "8px 14px", fontSize: 13 }} disabled={workingId === o.id} onClick={() => approve(o)}>{workingId === o.id ? <Loader2 className="spin" size={14} /> : <Check size={14} />} Approve & credit</button><button className="ghostbtn" onClick={() => cancel(o.id)}>Cancel</button></div>}
             {o.status === "paid" && <AdminOrderControls o={o} onStage={setStage} onCourier={saveCourier} />}
@@ -941,7 +952,17 @@ function RemindersPanel({ userId, reminders, setReminders, flash, onShop }) {
   );
 }
 
-function WalletPanel({ wallet, log, onRecharge, hasUpi, orders }) {
+function WalletPanel({ wallet, log, onRecharge, hasUpi, orders, profile, onSaveProfile }) {
+  const [fn, setFn] = useState(profile?.full_name || "");
+  const [ph, setPh] = useState(profile?.phone || "");
+  const [ad, setAd] = useState(profile?.address || "");
+  const [savingAddr, setSavingAddr] = useState(false);
+  async function saveAddr() {
+    if (!fn.trim() || !ph.trim() || !ad.trim()) return;
+    setSavingAddr(true);
+    await onSaveProfile({ full_name: fn.trim(), phone: ph.trim(), address: ad.trim() });
+    setSavingAddr(false);
+  }
   return (
     <>
       <h2 style={S.sectionTitle}>Your wallet</h2>
@@ -960,6 +981,14 @@ function WalletPanel({ wallet, log, onRecharge, hasUpi, orders }) {
           <div style={{ ...S.logAmt, color: e.amount < 0 ? "#C1432E" : "#1faa6b" }}>{e.amount < 0 ? "-" : "+"}{money(Math.abs(e.amount))}</div>
         </div>
       ))}</div>
+      <h3 style={S.subhead}>Delivery details</h3>
+      <p style={{ fontSize: 13.5, color: "#7a7080", margin: "0 0 12px" }}>Saved to your account and used for shipping your orders.</p>
+      <div style={{ maxWidth: 460, display: "flex", flexDirection: "column", gap: 10, marginBottom: 8 }}>
+        <input style={{ ...S.input, width: "100%" }} placeholder="Full name" value={fn} onChange={(e) => setFn(e.target.value)} />
+        <input style={{ ...S.input, width: "100%" }} placeholder="Phone number" value={ph} onChange={(e) => setPh(e.target.value)} />
+        <textarea style={{ ...S.input, width: "100%", minHeight: 80, resize: "vertical" }} placeholder="Full delivery address with pincode" value={ad} onChange={(e) => setAd(e.target.value)} />
+        <button className="cta" disabled={savingAddr || !fn.trim() || !ph.trim() || !ad.trim()} onClick={saveAddr}>{savingAddr ? <Loader2 className="spin" size={16} /> : <Check size={16} />} Save delivery details</button>
+      </div>
       <h3 style={S.subhead}>Recent orders</h3>
       {(!orders || orders.length === 0) ? <p style={{ color: "#9a8da5", fontSize: 14 }}>No orders yet.</p> : (
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>{orders.slice(0, 5).map((o) => <OrderCard key={o.id} o={o} />)}</div>
@@ -968,7 +997,7 @@ function WalletPanel({ wallet, log, onRecharge, hasUpi, orders }) {
   );
 }
 
-function CartPanel({ items, subtotal, wallet, onSetQty, onCheckout, onWalletPay, onShop }) {
+function CartPanel({ items, subtotal, wallet, onSetQty, onCheckout, onWalletPay, onShop, hasAddress, onNeedAddress }) {
   if (items.length === 0) return <div style={S.empty}><ShoppingCart size={32} color="#d6c9dd" /><p>Your cart is empty.</p><button className="cta" onClick={onShop}>Start shopping</button></div>;
   const canWallet = wallet >= subtotal && subtotal > 0;
   return (
@@ -989,8 +1018,17 @@ function CartPanel({ items, subtotal, wallet, onSetQty, onCheckout, onWalletPay,
         {subtotal > 2000 && <div style={{ ...S.sumLine, color: "#1faa6b", fontWeight: 800 }}><span>🎁 Reward</span><span>+₹50 on approval</span></div>}
         <div style={{ ...S.sumLine, ...S.sumTotal }}><span>Total</span><span>{money(subtotal)}</span></div>
         <div style={S.walletNote}><Wallet size={14} /> Wallet: {money(wallet)}</div>
-        {canWallet && <button className="cta full" style={{ marginBottom: 10 }} onClick={onWalletPay}><Zap size={16} /> Pay from wallet</button>}
-        <button className="ghostbtn" style={{ width: "100%", padding: 13 }} onClick={onCheckout}>Checkout with UPI <ArrowRight size={14} /></button>
+        {!hasAddress ? (
+          <>
+            <div style={S.warn}>Add a delivery address before checkout.</div>
+            <button className="cta full" onClick={onNeedAddress}>Add delivery address <ArrowRight size={14} /></button>
+          </>
+        ) : (
+          <>
+            {canWallet && <button className="cta full" style={{ marginBottom: 10 }} onClick={onWalletPay}><Zap size={16} /> Pay from wallet</button>}
+            <button className="ghostbtn" style={{ width: "100%", padding: 13 }} onClick={onCheckout}>Checkout with UPI <ArrowRight size={14} /></button>
+          </>
+        )}
       </div>
     </>
   );
@@ -1091,6 +1129,7 @@ const S = {
   trackLine: { position: "absolute", top: 13, left: "50%", width: "100%", height: 3, zIndex: 1 },
   trackPill: { display: "inline-block", padding: "6px 14px", borderRadius: 999, fontSize: 13, fontWeight: 800 },
   courierBox: { marginTop: 14, padding: "10px 14px", background: "#f6eef2", borderRadius: 12, fontSize: 13.5, color: "#5b5066", fontWeight: 600 },
+  shipBox: { marginTop: 8, padding: "8px 12px", background: "#fff6ee", border: "1px solid #ffe0c4", borderRadius: 10, fontSize: 12.5, color: "#8a5a2e", lineHeight: 1.5 },
   walletCard: { position: "relative", background: "linear-gradient(135deg,#C1432E,#8a5fb0)", borderRadius: 24, padding: "30px 30px 26px", color: "#fff", overflow: "hidden", maxWidth: 420 },
   walletGlow: { position: "absolute", width: 200, height: 200, background: "rgba(255,255,255,0.18)", borderRadius: "50%", top: -70, right: -40 },
   walletLabel: { display: "inline-flex", alignItems: "center", gap: 7, fontSize: 13, fontWeight: 700, opacity: 0.92 },
