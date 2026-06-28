@@ -45,7 +45,8 @@ const money = (n) => `₹${Number(n).toFixed(2)}`;
 const ADMIN_EMAIL = "ch.sambasiva998@gmail.com";
 const NEW_DAYS = 14;
 const CATEGORIES = ["STEM & Learning","Plush & Soft Toys","Classic & Wooden","Creative & Arts","Pretend Play","Baby & Infant","Games & Puzzles","Festive & Decor","Keepsakes & Gifts","Outdoor & Active"];
-
+const ORDER_STAGES = ["paid", "packed", "shipped", "out_for_delivery", "delivered"];
+const STAGE_LABELS = { pending: "Awaiting payment", paid: "Paid", packed: "Packed", shipped: "Shipped", out_for_delivery: "Out for delivery", delivered: "Delivered", cancelled: "Cancelled" };
 const FESTIVALS = [
   { id: "dussehra", name: "Dussehra / Navaratri", emoji: "🛕", prompts: [
     "A festive home with all nine Navadurga goddesses displayed, family doing puja happily together",
@@ -174,6 +175,7 @@ function Store({ session }) {
   const [aiOpen, setAiOpen] = useState(false);
   const [detailProduct, setDetailProduct] = useState(null);
   const [rechargeOpen, setRechargeOpen] = useState(false);
+  const [myOrders, setMyOrders] = useState([]);
 
   function flash(m) { setToast(m); setTimeout(() => setToast(null), 2800); }
 
@@ -188,20 +190,23 @@ function Store({ session }) {
 
   async function loadAll() {
     setLoading(true);
-    const [prod, prof, log, c, rem, setg] = await Promise.all([
+    const [prod, prof, log, c, rem, setg, myord] = await Promise.all([
       supabase.from("products").select("*, product_images(*)").order("created_at", { ascending: false }),
       supabase.from("profiles").select("wallet").eq("id", userId).single(),
       supabase.from("wallet_log").select("*").eq("user_id", userId).order("created_at", { ascending: false }),
       supabase.from("cart_items").select("*").eq("user_id", userId),
       supabase.from("reminders").select("*").eq("user_id", userId).order("remind_date"),
       supabase.from("store_settings").select("*").eq("id", 1).maybeSingle(),
+      supabase.from("orders").select("*").eq("user_id", userId).order("created_at", { ascending: false }),
     ]);
+    
     setProducts(prod.data || []);
     setWallet(prof.data?.wallet ?? 0);
     setWalletLog(log.data || []);
     setCart((c.data || []).map((r) => ({ product_id: r.product_id, qty: r.qty })));
     setReminders(rem.data || []);
     setSettings(setg.data || { upi_id: "", payee_name: "" });
+    setMyOrders(myord.data || []);
     setLoading(false);
   }
 
@@ -246,7 +251,8 @@ function Store({ session }) {
 
   const navItems = [
     { id: "shop", label: "Shop", icon: Package }, { id: "occasions", label: "Occasions", icon: Gift },
-    { id: "design", label: "Design a Toy", icon: Wand2 }, { id: "calendar", label: "Reminders", icon: Calendar },
+    { id: "design", label: "Design a Toy", icon: Wand2 }, { id: "orders", label: "My Orders", icon: ClipboardList },
+    { id: "calendar", label: "Reminders", icon: Calendar },
     { id: "wallet", label: "Wallet", icon: Wallet },
   ];
 
@@ -537,7 +543,53 @@ function DesignStudio({ flash }) {
     </>
   );
 }
+function OrderTracker({ stage }) {
+  if (stage === "cancelled") return <div style={{ ...S.trackPill, background: "#fdeceb", color: "#C1432E" }}>Cancelled</div>;
+  if (stage === "pending") return <div style={{ ...S.trackPill, background: "#fff0e0", color: "#E8A33D" }}>Awaiting payment confirmation</div>;
+  const idx = ORDER_STAGES.indexOf(stage);
+  return (
+    <div style={S.trackRow}>
+      {ORDER_STAGES.map((st, i) => (
+        <div key={st} style={S.trackStep}>
+          <div style={{ ...S.trackDot, background: i <= idx ? "#1faa6b" : "#e4d9e0", color: i <= idx ? "#fff" : "#9a8da5" }}>{i < idx ? <Check size={12} /> : i + 1}</div>
+          <div style={{ ...S.trackLabel, color: i <= idx ? "#3a2150" : "#9a8da5", fontWeight: i === idx ? 800 : 600 }}>{STAGE_LABELS[st]}</div>
+          {i < ORDER_STAGES.length - 1 && <div style={{ ...S.trackLine, background: i < idx ? "#1faa6b" : "#e4d9e0" }} />}
+        </div>
+      ))}
+    </div>
+  );
+}
 
+function OrderCard({ o }) {
+  return (
+    <div style={S.myOrderCard}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+        <div style={{ fontWeight: 800 }}>Order #{o.id} · {money(o.total)}</div>
+        <div style={{ fontSize: 12.5, color: "#9a8da5" }}>{prettyDateTime(o.created_at)}</div>
+      </div>
+      <div style={{ fontSize: 13, color: "#5b5066", margin: "6px 0 14px" }}>{(o.items || []).map((it, n) => <span key={n}>{it.name} ×{it.qty}{n < o.items.length - 1 ? ", " : ""}</span>)}</div>
+      <OrderTracker stage={o.stage || o.status} />
+      {o.courier && (o.stage === "shipped" || o.stage === "out_for_delivery" || o.stage === "delivered") && (
+        <div style={S.courierBox}>
+          🚚 <b>{o.courier}</b>
+          {o.tracking_link && <> · <a href={o.tracking_link} target="_blank" rel="noopener noreferrer" style={{ color: "#C1432E", fontWeight: 800 }}>Track package</a></>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MyOrders({ orders, onShop }) {
+  if (!orders || orders.length === 0)
+    return <div style={S.empty}><ClipboardList size={32} color="#d6c9dd" /><p>No orders yet.</p><button className="cta" onClick={onShop}>Start shopping</button></div>;
+  return (
+    <>
+      <h2 style={S.sectionTitle}>My orders</h2>
+      <p style={S.sectionSub}>Track each order from payment to delivery.</p>
+      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>{orders.map((o) => <OrderCard key={o.id} o={o} />)}</div>
+    </>
+  );
+}
 function CheckoutModal({ items, subtotal, settings, wallet, onClose, onConfirm, onWalletPay, onDone }) {
   const [order, setOrder] = useState(null); const [creating, setCreating] = useState(false);
   const hasUpi = settings?.upi_id?.trim(); const canWallet = wallet >= subtotal && subtotal > 0;
@@ -650,6 +702,14 @@ function AdminOrders({ flash }) {
   async function load() { setLoading(true); const { data, error } = await supabase.from("orders").select("*").order("created_at", { ascending: false }); if (error) flash("Load failed: " + error.message); setOrders(data || []); setLoading(false); }
   async function approve(o) { setWorkingId(o.id); const { error } = await supabase.rpc("approve_order", { p_order_id: o.id }); setWorkingId(null); if (error) { flash("Approve failed: " + error.message); return; } flash(`Approved · ${money(o.total)}${o.total > 2000 ? " +₹50" : ""} credited ✓`); load(); }
   async function cancel(id) { const { error } = await supabase.from("orders").update({ status: "cancelled" }).eq("id", id); if (error) flash("Failed: " + error.message); else { flash("Cancelled"); load(); } }
+  async function setStage(o, stage) {
+    const { error } = await supabase.from("orders").update({ stage }).eq("id", o.id);
+    if (error) flash("Failed: " + error.message); else { flash("Updated to " + (STAGE_LABELS[stage] || stage)); load(); }
+  }
+  async function saveCourier(o, courier, tracking_link) {
+    const { error } = await supabase.from("orders").update({ courier, tracking_link }).eq("id", o.id);
+    if (error) flash("Failed: " + error.message); else { flash("Tracking saved"); load(); }
+  }
   const shown = orders.filter((o) => filter === "all" ? true : o.status === filter);
   if (loading) return <div style={S.center}><Loader2 className="spin" size={28} color="#C1432E" /></div>;
   return (
@@ -666,10 +726,27 @@ function AdminOrders({ flash }) {
               <div style={{ fontSize: 13, color: "#5b5066" }}>{(o.items || []).map((it, n) => <span key={n}>{it.name} ×{it.qty}{n < o.items.length - 1 ? ", " : ""}</span>)}</div>
             </div>
             {o.status === "pending" && <div style={{ display: "flex", flexDirection: "column", gap: 6 }}><button className="cta" style={{ padding: "8px 14px", fontSize: 13 }} disabled={workingId === o.id} onClick={() => approve(o)}>{workingId === o.id ? <Loader2 className="spin" size={14} /> : <Check size={14} />} Approve & credit</button><button className="ghostbtn" onClick={() => cancel(o.id)}>Cancel</button></div>}
+            {o.status === "paid" && <AdminOrderControls o={o} onStage={setStage} onCourier={saveCourier} />}
           </div>
         ))}</div>
       )}
     </>
+  );
+}
+
+function AdminOrderControls({ o, onStage, onCourier }) {
+  const [courier, setCourier] = useState(o.courier || "");
+  const [link, setLink] = useState(o.tracking_link || "");
+  const current = o.stage && o.stage !== "pending" ? o.stage : "paid";
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8, minWidth: 220 }}>
+      <select style={{ ...S.input, padding: "8px 10px" }} value={current} onChange={(e) => onStage(o, e.target.value)}>
+        {ORDER_STAGES.map((st) => <option key={st} value={st}>{STAGE_LABELS[st]}</option>)}
+      </select>
+      <input style={{ ...S.input, padding: "8px 10px" }} placeholder="Courier name" value={courier} onChange={(e) => setCourier(e.target.value)} />
+      <input style={{ ...S.input, padding: "8px 10px" }} placeholder="Tracking link (optional)" value={link} onChange={(e) => setLink(e.target.value)} />
+      <button className="ghostbtn" onClick={() => onCourier(o, courier.trim(), link.trim())}>Save tracking</button>
+    </div>
   );
 }
 
@@ -801,8 +878,12 @@ function RemindersPanel({ userId, reminders, setReminders, flash, onShop }) {
     </>
   );
 }
-function WalletPanel({ wallet, log, onRecharge, hasUpi }) {
+function WalletPanel({ wallet, log, onRecharge, hasUpi, orders }) {
   return (
+    <h3 style={S.subhead}>Recent orders</h3>
+      {(!orders || orders.length === 0) ? <p style={{ color: "#9a8da5", fontSize: 14 }}>No orders yet.</p> : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>{orders.slice(0, 5).map((o) => <OrderCard key={o.id} o={o} />)}</div>
+      )}
     <>
       <h2 style={S.sectionTitle}>Your wallet</h2>
       <p style={S.sectionSub}>Recharge via UPI — the shop confirms your payment and your balance updates live.</p>
@@ -874,6 +955,15 @@ function daysUntilYearly(dateStr) {
   return Math.round((nextYearlyDate(dateStr) - today) / 86400000);
 }
 const S = {
+  walletNote: { display: "flex", alignItems: "center", gap: 7, fontSize: 13, color: "#7a7080", fontWeight: 700, margin: "12px 0 16px" },
+  myOrderCard: { background: "#fff", border: "1px solid #f0e3ec", borderRadius: 16, padding: 18 },
+  trackRow: { display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 4, position: "relative" },
+  trackStep: { flex: 1, display: "flex", flexDirection: "column", alignItems: "center", position: "relative", textAlign: "center" },
+  trackDot: { width: 26, height: 26, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 800, zIndex: 2 },
+  trackLabel: { fontSize: 10.5, marginTop: 6, lineHeight: 1.25, maxWidth: 64 },
+  trackLine: { position: "absolute", top: 13, left: "50%", width: "100%", height: 3, zIndex: 1 },
+  trackPill: { display: "inline-block", padding: "6px 14px", borderRadius: 999, fontSize: 13, fontWeight: 800 },
+  courierBox: { marginTop: 14, padding: "10px 14px", background: "#f6eef2", borderRadius: 12, fontSize: 13.5, color: "#5b5066", fontWeight: 600 },
   app: { fontFamily: "'Nunito', system-ui, sans-serif", background: "#FDF7F0", minHeight: "100vh", color: "#2a1a3e" },
   center: { minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#FDF7F0" },
   authWrap: { minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, background: "linear-gradient(120deg,#FFE9D6,#F3E0F0)" },
