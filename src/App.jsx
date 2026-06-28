@@ -187,7 +187,7 @@ function Store({ session }) {
   const [detailProduct, setDetailProduct] = useState(null);
   const [rechargeOpen, setRechargeOpen] = useState(false);
   const [myOrders, setMyOrders] = useState([]);
-  const [profile, setProfile] = useState({ full_name: "", phone: "", address: "" });  
+  const [profile, setProfile] = useState({ full_name: "", phone: "", address: "" });
 
   function flash(m) { setToast(m); setTimeout(() => setToast(null), 2800); }
 
@@ -246,7 +246,7 @@ function Store({ session }) {
 
   async function createPendingOrder() {
     const items = cartDetailed.map((i) => ({ name: i.name, qty: i.qty, price: i.price }));
-    const { data, error } = await supabase.from("orders").insert({ user_id: userId, total: subtotal, items, status: "pending" }).select().single();
+    const { data, error } = await supabase.from("orders").insert({ user_id: userId, total: subtotal, items, status: "pending", ship_name: profile.full_name, ship_phone: profile.phone, ship_address: profile.address }).select().single();
     if (error) { flash(error.message); return null; }
     return data;
   }
@@ -263,7 +263,6 @@ function Store({ session }) {
     const { error } = await supabase.from("profiles").update({ full_name: p.full_name, phone: p.phone, address: p.address }).eq("id", userId);
     if (error) { flash("Address save failed: " + error.message); return false; }
     setProfile(p); flash("Delivery details saved"); return true;
-  }
   }
 
   if (loading) return <div style={S.center}><Loader2 className="spin" size={32} color="#C1432E" /></div>;
@@ -387,6 +386,7 @@ function Store({ session }) {
       <footer style={S.footer}><span>🪔 {settings?.brand_name || "Vaayanam"}</span><span style={{ color: "#9a8da5" }}>Signed in as {session.user.email}</span></footer>
     </div>
   );
+}
 
 function ProductCard({ p, qty, fav, onFav, onInc, onDec, onOpen }) {
   const imgs = imagesFor(p);
@@ -511,7 +511,7 @@ function AIAssistant({ products, onClose }) {
     const next = [...messages, { role: "user", content: text }];
     setMessages(next); setInput(""); setBusy(true);
     try {
-      const { data, error } = await supabase.from("orders").insert({ user_id: userId, total: subtotal, items, status: "pending", ship_name: profile.full_name, ship_phone: profile.phone, ship_address: profile.address }).select().single();
+      const { data, error } = await supabase.functions.invoke("ai-assistant", { body: { messages: next, products: products.map((p) => ({ name: p.name, price: p.price, category: p.category, age_range: p.age_range, description: p.description })) } });
       if (error) throw error;
       setMessages((m) => [...m, { role: "assistant", content: data.text || "Sorry, I couldn't respond." }]);
     } catch { setMessages((m) => [...m, { role: "assistant", content: "I'm having trouble connecting right now. Please try again." }]); }
@@ -655,7 +655,7 @@ function AdminPanel({ flash, onChanged, products, settings }) {
         <button className={`subtab ${sub === "products" ? "subtab-on" : ""}`} onClick={() => setSub("products")}><Package size={15} /> Products</button>
         <button className={`subtab ${sub === "orders" ? "subtab-on" : ""}`} onClick={() => setSub("orders")}><ClipboardList size={15} /> Orders</button>
         <button className={`subtab ${sub === "topups" ? "subtab-on" : ""}`} onClick={() => setSub("topups")}><CreditCard size={15} /> Top-ups</button>
-        <button className={`subtab ${sub === "settings" ? "subtab-on" : ""}`} onClick={() => setSub("settings")}><Settings size={15} /> Settings</button>
+        <button className={`subtab ${sub === "settings" ? "subtab-on" : ""}`} onClick={() => setSub("settings")}><Settings size={15} /> Payment</button>
       </div>
       {sub === "products" && <AdminProducts flash={flash} onChanged={onChanged} products={products} />}
       {sub === "orders" && <AdminOrders flash={flash} />}
@@ -766,7 +766,6 @@ function AdminSettings({ flash, onChanged, settings }) {
     </>
   );
 }
-
 function AdminOrders({ flash }) {
   const [orders, setOrders] = useState([]); const [loading, setLoading] = useState(true); const [filter, setFilter] = useState("pending"); const [workingId, setWorkingId] = useState(null);
   useEffect(() => { load(); }, []);
@@ -797,9 +796,8 @@ function AdminOrders({ flash }) {
               <div style={{ fontSize: 13, color: "#5b5066" }}>{(o.items || []).map((it, n) => <span key={n}>{it.name} ×{it.qty}{n < o.items.length - 1 ? ", " : ""}</span>)}</div>
               {o.ship_address && <div style={S.shipBox}><b>Ship to:</b> {o.ship_name}{o.ship_phone ? ` · ${o.ship_phone}` : ""}<br/>{o.ship_address}</div>}
             </div>
-            </div>
-            (o.status === "pending" && <div style={{ display: "flex", flexDirection: "column", gap: 6 }}><button className="cta" style={{ padding: "8px 14px", fontSize: 13 }} disabled={workingId === o.id} onClick={() => approve(o)}>{workingId === o.id ? <Loader2 className="spin" size={14} /> : <Check size={14} />} Approve & credit</button><button className="ghostbtn" onClick={() => cancel(o.id)}>Cancel</button></div>)
-            (o.status === "paid" && <AdminOrderControls o={o} onStage={setStage} onCourier={saveCourier} />)
+            {o.status === "pending" && <div style={{ display: "flex", flexDirection: "column", gap: 6 }}><button className="cta" style={{ padding: "8px 14px", fontSize: 13 }} disabled={workingId === o.id} onClick={() => approve(o)}>{workingId === o.id ? <Loader2 className="spin" size={14} /> : <Check size={14} />} Approve & credit</button><button className="ghostbtn" onClick={() => cancel(o.id)}>Cancel</button></div>}
+            {o.status === "paid" && <AdminOrderControls o={o} onStage={setStage} onCourier={saveCourier} />}
           </div>
         ))}</div>
       )}
