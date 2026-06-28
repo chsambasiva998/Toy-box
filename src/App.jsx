@@ -25,7 +25,7 @@ const OCCASIONS = [
 const money = (n) => `₹${Number(n).toFixed(2)}`;
 
 // ⚠️ MUST equal your login email AND the email in your Supabase policies/functions.
-const ADMIN_EMAIL = "YOUR_ADMIN_EMAIL@example.com";
+const ADMIN_EMAIL = "ch.sambasiva998@gmail.com";
 
 const NEW_DAYS = 14; // items newer than this show a NEW badge
 
@@ -637,7 +637,7 @@ function AdminSettings({ flash, onChanged, settings }) {
   const [payeeName, setPayeeName] = useState(settings?.payee_name || "");
   const [busy, setBusy] = useState(false);
   async function save() {
-    if (!upiId.trim()) { flash("Enter your UPI ID"); return; }
+    if (!upiId.trim()) { flash("7981166388-2@ybl"); return; }
     setBusy(true);
     const { error } = await supabase.from("store_settings").upsert({ id: 1, upi_id: upiId.trim(), payee_name: payeeName.trim(), updated_at: new Date().toISOString() });
     setBusy(false);
