@@ -387,7 +387,6 @@ function Store({ session }) {
       <footer style={S.footer}><span>🪔 {settings?.brand_name || "Vaayanam"}</span><span style={{ color: "#9a8da5" }}>Signed in as {session.user.email}</span></footer>
     </div>
   );
-}
 
 function ProductCard({ p, qty, fav, onFav, onInc, onDec, onOpen }) {
   const imgs = imagesFor(p);
