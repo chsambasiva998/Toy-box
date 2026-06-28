@@ -798,7 +798,7 @@ function AdminOrders({ flash }) {
               {o.ship_address && <div style={S.shipBox}><b>Ship to:</b> {o.ship_name}{o.ship_phone ? ` · ${o.ship_phone}` : ""}<br/>{o.ship_address}</div>}
             </div>
             </div>
-            {o.status === "pending" && <div style={{ display: "flex", flexDirection: "column", gap: 6 }}><button className="cta" style={{ padding: "8px 14px", fontSize: 13 }} disabled={workingId === o.id} onClick={() => approve(o)}>{workingId === o.id ? <Loader2 className="spin" size={14} /> : <Check size={14} />} Approve & credit</button><button className="ghostbtn" onClick={() => cancel(o.id)}>Cancel</button></div>}
+            (o.status === "pending" && <div style={{ display: "flex", flexDirection: "column", gap: 6 }}><button className="cta" style={{ padding: "8px 14px", fontSize: 13 }} disabled={workingId === o.id} onClick={() => approve(o)}>{workingId === o.id ? <Loader2 className="spin" size={14} /> : <Check size={14} />} Approve & credit</button><button className="ghostbtn" onClick={() => cancel(o.id)}>Cancel</button></div>)
             {o.status === "paid" && <AdminOrderControls o={o} onStage={setStage} onCourier={saveCourier} />}
           </div>
         ))}</div>
