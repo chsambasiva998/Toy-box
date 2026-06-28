@@ -4,7 +4,7 @@ import {
   Bell, Star, Trash2, Heart, Check, ArrowRight, Sparkles, Package,
   CreditCard, PartyPopper, CakeSlice, Baby, GraduationCap, LogOut, Loader2,
   QrCode, ClipboardList, Settings, Zap, MessageCircle, Wand2, Send, Download,
-  ChevronLeft, ChevronRight, IndianRupee,
+ ChevronLeft, ChevronRight,
 } from "lucide-react";
 import QRCode from "qrcode";
 import { supabase } from "./supabaseClient";
