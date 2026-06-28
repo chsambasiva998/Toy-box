@@ -15,9 +15,30 @@ import { supabase } from "./supabaseClient";
 
 const OCCASIONS = [
   { id: "birthday", label: "Birthday", icon: CakeSlice, hue: "#FF6B9D", tags: ["fun", "celebration"] },
-  { id: "newborn", label: "Newborn", icon: Baby, hue: "#7FD8BE", tags: ["baby", "soft"] },
+  { id: "first_birthday", label: "First Birthday", icon: CakeSlice, hue: "#FF8FB1", tags: ["baby", "fun", "celebration"] },
+  { id: "newborn", label: "Newborn / Baby Shower", icon: Baby, hue: "#7FD8BE", tags: ["baby", "soft"] },
+  { id: "naming", label: "Naming Ceremony", icon: Baby, hue: "#6FCBb0", tags: ["baby", "soft", "celebration"] },
   { id: "graduation", label: "Graduation", icon: GraduationCap, hue: "#6C8EFF", tags: ["milestone", "learning"] },
-  { id: "holiday", label: "Holiday", icon: PartyPopper, hue: "#FFB454", tags: ["festive", "celebration"] },
+  { id: "wedding", label: "Wedding", icon: Gift, hue: "#E8739B", tags: ["milestone", "celebration"] },
+  { id: "anniversary", label: "Anniversary", icon: Heart, hue: "#E0567E", tags: ["celebration", "milestone"] },
+  { id: "engagement", label: "Engagement", icon: Heart, hue: "#EC6A8C", tags: ["celebration", "milestone"] },
+  { id: "housewarming", label: "Housewarming", icon: Gift, hue: "#C98A3D", tags: ["milestone", "celebration"] },
+  { id: "retirement", label: "Retirement", icon: Star, hue: "#9B8AC4", tags: ["milestone", "celebration"] },
+  { id: "farewell", label: "Farewell", icon: Star, hue: "#8A8FB0", tags: ["milestone", "celebration"] },
+  { id: "promotion", label: "Promotion", icon: Star, hue: "#5BA8C9", tags: ["milestone", "celebration"] },
+  { id: "party", label: "Party / Get-together", icon: PartyPopper, hue: "#FF9F45", tags: ["fun", "celebration"] },
+  { id: "diwali", label: "Diwali", icon: PartyPopper, hue: "#FFB454", tags: ["festive", "celebration"] },
+  { id: "dussehra", label: "Dussehra / Navaratri", icon: PartyPopper, hue: "#E8A33D", tags: ["festive", "celebration"] },
+  { id: "sankranti", label: "Sankranti / Pongal", icon: PartyPopper, hue: "#F0A030", tags: ["festive", "fun"] },
+  { id: "ugadi", label: "Ugadi", icon: Sparkles, hue: "#7FB069", tags: ["festive", "celebration"] },
+  { id: "ganesh", label: "Ganesh Chaturthi", icon: PartyPopper, hue: "#E07A5F", tags: ["festive", "celebration"] },
+  { id: "rakhi", label: "Raksha Bandhan", icon: Heart, hue: "#D45D79", tags: ["festive", "celebration"] },
+  { id: "holi", label: "Holi", icon: Sparkles, hue: "#C77DFF", tags: ["festive", "fun"] },
+  { id: "christmas", label: "Christmas", icon: Gift, hue: "#2A9D8F", tags: ["festive", "celebration"] },
+  { id: "newyear", label: "New Year", icon: Sparkles, hue: "#6C8EFF", tags: ["festive", "celebration", "fun"] },
+  { id: "eid", label: "Eid", icon: Sparkles, hue: "#5C8A6A", tags: ["festive", "celebration"] },
+  { id: "onam", label: "Onam", icon: Sparkles, hue: "#E9943A", tags: ["festive", "celebration"] },
+  { id: "other", label: "Other", icon: Gift, hue: "#9a8da5", tags: ["celebration", "fun"] },
 ];
 
 const money = (n) => `₹${Number(n).toFixed(2)}`;
@@ -245,6 +266,27 @@ function Store({ session }) {
       <main style={S.main}>
         {tab === "shop" && (
           <>
+            {tab === "shop" && (
+          <>
+            {(() => {
+              const upcoming = reminders.filter((r) => daysUntilYearly(r.remind_date) <= 14).sort((a, b) => daysUntilYearly(a.remind_date) - daysUntilYearly(b.remind_date));
+              if (upcoming.length === 0) return null;
+              return (
+                <div style={S.reminderBanner}>
+                  <Bell size={18} color="#C1432E" />
+                  <div style={{ flex: 1 }}>
+                    <b>Coming up:</b>{" "}
+                    {upcoming.slice(0, 3).map((r, i) => {
+                      const d = daysUntilYearly(r.remind_date);
+                      return <span key={r.id}>{r.title} ({d === 0 ? "today" : `${d}d`}){i < Math.min(upcoming.length, 3) - 1 ? ", " : ""}</span>;
+                    })}
+                    {upcoming.length > 3 && ` +${upcoming.length - 3} more`}
+                  </div>
+                  <button className="ghostbtn" onClick={() => setTab("calendar")}>View</button>
+                </div>
+              );
+            })()}
+            <section style={S.hero}>
             <section style={S.hero}>
               <div style={S.heroInner}>
                 <div style={S.heroEyebrow}><Sparkles size={14} /> Gifts with meaning</div>
@@ -712,31 +754,48 @@ function AdminProducts({ flash, onChanged, products }) {
 
 function RemindersPanel({ userId, reminders, setReminders, flash, onShop }) {
   const [title, setTitle] = useState(""); const [date, setDate] = useState(""); const [occ, setOcc] = useState("birthday");
+  const [customOcc, setCustomOcc] = useState("");
   async function add() {
     if (!title.trim() || !date) { flash("Add a name and a date"); return; }
-    const { data, error } = await supabase.from("reminders").insert({ user_id: userId, title: title.trim(), remind_date: date, occasion: occ }).select().single();
+    const occLabel = occ === "other" ? (customOcc.trim() || "Other") : occ;
+    const { data, error } = await supabase.from("reminders").insert({ user_id: userId, title: title.trim(), remind_date: date, occasion: occLabel }).select().single();
     if (error) { flash(error.message); return; }
-    setReminders((r) => [...r, data].sort((a, b) => a.remind_date.localeCompare(b.remind_date))); setTitle(""); setDate(""); flash("Reminder saved 🔔");
+    setReminders((r) => [...r, data]);
+    setTitle(""); setDate(""); setCustomOcc(""); flash("Reminder saved 🔔 — repeats every year");
   }
   async function remove(id) { setReminders((r) => r.filter((x) => x.id !== id)); await supabase.from("reminders").delete().eq("id", id); }
+
+  // sort by next yearly occurrence
+  const sorted = [...reminders].sort((a, b) => daysUntilYearly(a.remind_date) - daysUntilYearly(b.remind_date));
+
   return (
     <>
       <h2 style={S.sectionTitle}>Gift reminders</h2>
-      <p style={S.sectionSub}>Never miss a moment — we'll line up gift ideas when it's time.</p>
+      <p style={S.sectionSub}>Reminders repeat every year on the same date. We'll surface upcoming ones when you visit.</p>
       <div style={S.reminderForm}>
         <input style={S.input} placeholder="Whose moment? e.g. Amma's birthday" value={title} onChange={(e) => setTitle(e.target.value)} />
         <input style={S.input} type="date" value={date} onChange={(e) => setDate(e.target.value)} />
         <select style={S.input} value={occ} onChange={(e) => setOcc(e.target.value)}>{OCCASIONS.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}</select>
         <button className="cta" onClick={add}><Plus size={16} /> Add reminder</button>
       </div>
+      {occ === "other" && (
+        <input style={{ ...S.input, width: "100%", marginBottom: 18 }} placeholder="Name your occasion, e.g. Mom & Dad's wedding day" value={customOcc} onChange={(e) => setCustomOcc(e.target.value)} />
+      )}
       <div style={S.reminderList}>
-        {reminders.length === 0 && <div style={S.empty}><Bell size={28} color="#d6c9dd" /><p>No reminders yet.</p></div>}
-        {reminders.map((r) => { const o = OCCASIONS.find((x) => x.id === r.occasion) || OCCASIONS[0]; const days = daysUntil(r.remind_date);
+        {sorted.length === 0 && <div style={S.empty}><Bell size={28} color="#d6c9dd" /><p>No reminders yet.</p></div>}
+        {sorted.map((r) => {
+          const o = OCCASIONS.find((x) => x.id === r.occasion);
+          const hue = o?.hue || "#9a8da5"; const Icon = o?.icon || Gift;
+          const days = daysUntilYearly(r.remind_date);
+          const occId = o?.id || "birthday";
           return (
             <div key={r.id} className="reminderCard">
-              <span style={{ ...S.occIcon, background: o.hue + "22", color: o.hue }}><o.icon size={20} /></span>
-              <div style={{ flex: 1 }}><div style={S.reminderTitle}>{r.title}</div><div style={S.reminderMeta}>{prettyDate(r.remind_date)} · {days < 0 ? "passed" : days === 0 ? "today!" : `in ${days} day${days > 1 ? "s" : ""}`}</div></div>
-              <button className="ghostbtn" onClick={() => onShop(r.occasion)}>Find gifts</button>
+              <span style={{ ...S.occIcon, background: hue + "22", color: hue }}><Icon size={20} /></span>
+              <div style={{ flex: 1 }}>
+                <div style={S.reminderTitle}>{r.title}</div>
+                <div style={S.reminderMeta}>{(o?.label || r.occasion)} · {prettyDate(nextYearlyDate(r.remind_date))} · {days === 0 ? "today! 🎉" : `in ${days} day${days > 1 ? "s" : ""}`}</div>
+              </div>
+              <button className="ghostbtn" onClick={() => onShop(occId)}>Find gifts</button>
               <button className="iconbtn" onClick={() => remove(r.id)}><Trash2 size={16} /></button>
             </div>
           );
@@ -745,7 +804,6 @@ function RemindersPanel({ userId, reminders, setReminders, flash, onShop }) {
     </>
   );
 }
-
 function WalletPanel({ wallet, log, onRecharge, hasUpi }) {
   return (
     <>
@@ -804,7 +862,20 @@ function Modal({ children, onClose, wide }) {
 function daysUntil(s) { const t = new Date(); t.setHours(0,0,0,0); const d = new Date(s); d.setHours(0,0,0,0); return Math.round((d - t) / 86400000); }
 function prettyDate(s) { return new Date(s).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }); }
 function prettyDateTime(s) { return new Date(s).toLocaleDateString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }); }
+// Next occurrence of a month/day, repeating yearly
+function nextYearlyDate(dateStr) {
+  const orig = new Date(dateStr);
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  let next = new Date(today.getFullYear(), orig.getMonth(), orig.getDate());
+  next.setHours(0, 0, 0, 0);
+  if (next < today) next = new Date(today.getFullYear() + 1, orig.getMonth(), orig.getDate());
+  return next;
+}
 
+function daysUntilYearly(dateStr) {
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  return Math.round((nextYearlyDate(dateStr) - today) / 86400000);
+}
 const S = {
   app: { fontFamily: "'Nunito', system-ui, sans-serif", background: "#FDF7F0", minHeight: "100vh", color: "#2a1a3e" },
   center: { minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#FDF7F0" },
@@ -821,6 +892,7 @@ const S = {
   nav: { display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" },
   main: { maxWidth: 1100, margin: "0 auto", padding: "28px 20px 60px" },
   hero: { display: "flex", gap: 24, alignItems: "center", background: "linear-gradient(120deg,#FFE9D6,#F3E0F0)", borderRadius: 28, padding: "40px 36px", marginBottom: 28, overflow: "hidden", flexWrap: "wrap" },
+  reminderBanner: { display: "flex", alignItems: "center", gap: 12, background: "#FFF3EC", border: "1px solid #ffd9c4", borderRadius: 16, padding: "12px 16px", marginBottom: 20, fontSize: 14, color: "#5b5066", fontWeight: 600 },
   heroInner: { flex: "1 1 320px" },
   heroEyebrow: { display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 800, color: "#C1432E", background: "#fff", padding: "5px 12px", borderRadius: 999, marginBottom: 14 },
   heroTitle: { fontSize: 38, fontWeight: 900, lineHeight: 1.08, margin: "0 0 12px", color: "#3a2150" },
