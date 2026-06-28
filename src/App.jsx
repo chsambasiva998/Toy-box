@@ -130,6 +130,15 @@ function AuthScreen() {
   const [mode, setMode] = useState("signin");
   const [email, setEmail] = useState(""); const [pass, setPass] = useState("");
   const [msg, setMsg] = useState(null); const [busy, setBusy] = useState(false);
+  const [brand, setBrand] = useState(null);
+  useEffect(() => {
+    supabase.from("store_settings").select("brand_name, tagline_en, tagline_te, logo_url").eq("id", 1).maybeSingle()
+      .then(({ data }) => setBrand(data || {}));
+  }, []);
+  const bName = brand?.brand_name || "Vaayanam";
+  const bEn = brand?.tagline_en || "A Telugu Way of Giving Love and Respect";
+  const bTe = brand?.tagline_te || "";
+  const bLogo = brand?.logo_url || null;
   async function submit() {
     setBusy(true); setMsg(null);
     try {
@@ -142,9 +151,10 @@ function AuthScreen() {
   return (
     <div style={S.app}><style>{CSS}</style>
       <div style={S.authWrap}><div style={S.authCard}>
-        <div style={{ fontSize: 40, textAlign: "center" }}>🪔</div>
-        <div style={S.authBrand}>Vaayanam</div>
-        <div style={S.authMotto}>A Telugu Way of Giving Love and Respect</div>
+        {bLogo ? <img src={bLogo} alt={bName} style={{ width: 64, height: 64, objectFit: "contain", margin: "0 auto", display: "block" }} /> : <div style={{ fontSize: 40, textAlign: "center" }}>🪔</div>}
+        <div style={S.authBrand}>{bName}</div>
+        <div style={S.authMotto}>{bEn}</div>
+        {bTe && <div style={{ ...S.authMotto, marginTop: 0 }}>{bTe}</div>}
         <div style={S.authTag}>{mode === "signin" ? "Welcome back." : mode === "signup" ? "Create your account." : "Reset your password."}</div>
         <input style={S.input} type="email" placeholder="you@email.com" value={email} onChange={(e) => setEmail(e.target.value)} />
         {mode !== "reset" && <input style={S.input} type="password" placeholder="Password (6+ chars)" value={pass} onChange={(e) => setPass(e.target.value)} />}
@@ -259,7 +269,14 @@ function Store({ session }) {
   return (
     <div style={S.app}><style>{CSS}</style>
       <header style={S.header}>
-        <div style={S.brand}><span style={S.logoMark}>🪔</span><div><div style={S.brandName}>Vaayanam</div><div style={S.brandTag}>A Telugu Way of Giving Love and Respect</div></div></div>
+        <div style={{ ...S.brand, cursor: "pointer" }} onClick={() => setTab("shop")} title="Go to shop">
+          {settings?.logo_url ? <img src={settings.logo_url} alt={settings?.brand_name || "Vaayanam"} style={{ width: 40, height: 40, objectFit: "contain", borderRadius: 8 }} /> : <span style={S.logoMark}>🪔</span>}
+          <div>
+            <div style={S.brandName}>{settings?.brand_name || "Vaayanam"}</div>
+            <div style={S.brandTag}>{settings?.tagline_en || "A Telugu Way of Giving Love and Respect"}</div>
+            {settings?.tagline_te && <div style={S.brandTagTe}>{settings.tagline_te}</div>}
+          </div>
+        </div>
         <nav style={S.nav}>
           {navItems.map((t) => <button key={t.id} className={`navbtn ${tab === t.id ? "navbtn-on" : ""}`} onClick={() => setTab(t.id)}><t.icon size={17} /> {t.label}</button>)}
           {isAdmin && <button className={`navbtn ${tab === "admin" ? "navbtn-on" : ""}`} onClick={() => setTab("admin")}><Settings size={17} /> Admin</button>}
@@ -358,7 +375,7 @@ function Store({ session }) {
       {aiOpen && <AIAssistant products={products} onClose={() => setAiOpen(false)} />}
 
       {toast && <div className="toast">{toast}</div>}
-      <footer style={S.footer}><span>🪔 Vaayanam</span><span style={{ color: "#9a8da5" }}>Signed in as {session.user.email}</span></footer>
+      <footer style={S.footer}><span>🪔 {settings?.brand_name || "Vaayanam"}</span><span style={{ color: "#9a8da5" }}>Signed in as {session.user.email}</span></footer>
     </div>
   );
 }
@@ -630,7 +647,7 @@ function AdminPanel({ flash, onChanged, products, settings }) {
         <button className={`subtab ${sub === "products" ? "subtab-on" : ""}`} onClick={() => setSub("products")}><Package size={15} /> Products</button>
         <button className={`subtab ${sub === "orders" ? "subtab-on" : ""}`} onClick={() => setSub("orders")}><ClipboardList size={15} /> Orders</button>
         <button className={`subtab ${sub === "topups" ? "subtab-on" : ""}`} onClick={() => setSub("topups")}><CreditCard size={15} /> Top-ups</button>
-        <button className={`subtab ${sub === "settings" ? "subtab-on" : ""}`} onClick={() => setSub("settings")}><Settings size={15} /> Payment</button>
+        <button className={`subtab ${sub === "settings" ? "subtab-on" : ""}`} onClick={() => setSub("settings")}><Settings size={15} /> Settings</button>
       </div>
       {sub === "products" && <AdminProducts flash={flash} onChanged={onChanged} products={products} />}
       {sub === "orders" && <AdminOrders flash={flash} />}
@@ -677,22 +694,65 @@ function AdminTopups({ flash }) {
 
 function AdminSettings({ flash, onChanged, settings }) {
   const [upiId, setUpiId] = useState(settings?.upi_id || ""); const [payeeName, setPayeeName] = useState(settings?.payee_name || ""); const [busy, setBusy] = useState(false);
+  const [brandName, setBrandName] = useState(settings?.brand_name || "");
+  const [taglineEn, setTaglineEn] = useState(settings?.tagline_en || "");
+  const [taglineTe, setTaglineTe] = useState(settings?.tagline_te || "");
+  const [logoUrl, setLogoUrl] = useState(settings?.logo_url || "");
+  const [logoBusy, setLogoBusy] = useState(false);
   async function save() {
     if (!upiId.trim()) { flash("Enter your UPI ID"); return; }
     setBusy(true);
-    const { error } = await supabase.from("store_settings").upsert({ id: 1, upi_id: upiId.trim(), payee_name: payeeName.trim(), updated_at: new Date().toISOString() });
+    const { error } = await supabase.from("store_settings").upsert({
+      id: 1, upi_id: upiId.trim(), payee_name: payeeName.trim(),
+      brand_name: brandName.trim() || "Vaayanam", tagline_en: taglineEn.trim(), tagline_te: taglineTe.trim(),
+      logo_url: logoUrl || null, updated_at: new Date().toISOString(),
+    });
     setBusy(false);
     if (error) { flash("Save failed: " + error.message); return; }
     flash("Saved"); onChanged();
   }
+  async function uploadLogo(file) {
+    if (!file) return;
+    setLogoBusy(true);
+    try {
+      const ext = file.name.split(".").pop();
+      const path = `logo-${Date.now()}.${ext}`;
+      const { error: upErr } = await supabase.storage.from("product-images").upload(path, file, { upsert: true });
+      if (upErr) throw upErr;
+      const url = supabase.storage.from("product-images").getPublicUrl(path).data.publicUrl;
+      setLogoUrl(url);
+      flash("Logo uploaded — click Save to apply");
+    } catch (e) { flash("Logo upload failed: " + e.message); }
+    finally { setLogoBusy(false); }
+  }
   return (
     <>
-      <h2 style={S.sectionTitle}>Payment settings</h2>
-      <p style={S.sectionSub}>Your UPI ID generates QR codes for purchases and wallet recharges.</p>
+      <h2 style={S.sectionTitle}>Store settings</h2>
+      <p style={S.sectionSub}>Branding, payment, and how money works.</p>
+
+      <h3 style={S.subhead}>Branding</h3>
+      <div style={{ maxWidth: 460, display: "flex", flexDirection: "column", gap: 12, marginBottom: 8 }}>
+        <div>
+          <div style={S.adminLabel}>Logo image</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+            {logoUrl ? <img src={logoUrl} alt="Logo" style={{ width: 56, height: 56, objectFit: "contain", borderRadius: 10, border: "1px solid #f0e3ec" }} /> : <span style={{ fontSize: 40 }}>🪔</span>}
+            <div>
+              <input type="file" accept="image/*" onChange={(e) => uploadLogo(e.target.files?.[0])} />
+              {logoBusy && <Loader2 className="spin" size={16} color="#C1432E" />}
+              {logoUrl && <button className="linkbtn" style={{ display: "block", marginTop: 6 }} onClick={() => setLogoUrl("")}>Remove logo (use emoji)</button>}
+            </div>
+          </div>
+        </div>
+        <div><div style={S.adminLabel}>Brand name</div><input style={{ ...S.input, width: "100%" }} placeholder="Vaayanam" value={brandName} onChange={(e) => setBrandName(e.target.value)} /></div>
+        <div><div style={S.adminLabel}>Tagline (English)</div><input style={{ ...S.input, width: "100%" }} placeholder="A Telugu Way of Giving Love and Respect" value={taglineEn} onChange={(e) => setTaglineEn(e.target.value)} /></div>
+        <div><div style={S.adminLabel}>Tagline (Telugu)</div><input style={{ ...S.input, width: "100%" }} placeholder="ప్రేమను, గౌరవాన్ని పంచే తెలుగు మార్గం" value={taglineTe} onChange={(e) => setTaglineTe(e.target.value)} /></div>
+      </div>
+
+      <h3 style={S.subhead}>Payment</h3>
       <div style={{ maxWidth: 460, display: "flex", flexDirection: "column", gap: 12 }}>
         <div><div style={S.adminLabel}>UPI ID (VPA)</div><input style={{ ...S.input, width: "100%" }} placeholder="yourname@okbank" value={upiId} onChange={(e) => setUpiId(e.target.value)} /></div>
         <div><div style={S.adminLabel}>Payee name</div><input style={{ ...S.input, width: "100%" }} placeholder="Vaayanam" value={payeeName} onChange={(e) => setPayeeName(e.target.value)} /></div>
-        <button className="cta" disabled={busy} onClick={save}>{busy ? <Loader2 className="spin" size={16} /> : <Check size={16} />} Save</button>
+        <button className="cta" disabled={busy} onClick={save}>{busy ? <Loader2 className="spin" size={16} /> : <Check size={16} />} Save all settings</button>
       </div>
       <div style={S.securityNote}><b>How money works:</b> customers pay your UPI directly. Everything stays <b>pending</b> until you confirm receipt and approve it here. Approving credits the customer's wallet (purchases over ₹2000 add a ₹50 reward).</div>
     </>
@@ -969,6 +1029,7 @@ const S = {
   header: { display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 28px", background: "#fff", borderBottom: "1px solid #f0e3ec", position: "sticky", top: 0, zIndex: 50, flexWrap: "wrap", gap: 12 },
   brand: { display: "flex", alignItems: "center", gap: 12 }, logoMark: { fontSize: 30 },
   brandName: { fontWeight: 900, fontSize: 23, color: "#C1432E" }, brandTag: { fontSize: 10.5, color: "#C1432E", fontWeight: 700, fontStyle: "italic" },
+  brandTagTe: { fontSize: 10.5, color: "#8a5fb0", fontWeight: 700 },
   nav: { display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" },
   main: { maxWidth: 1100, margin: "0 auto", padding: "28px 20px 60px" },
   hero: { display: "flex", gap: 24, alignItems: "center", background: "linear-gradient(120deg,#FFE9D6,#F3E0F0)", borderRadius: 28, padding: "40px 36px", marginBottom: 28, overflow: "hidden", flexWrap: "wrap" },
