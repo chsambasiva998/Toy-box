@@ -47,6 +47,7 @@ const NEW_DAYS = 14;
 const CATEGORIES = ["STEM & Learning","Plush & Soft Toys","Classic & Wooden","Creative & Arts","Pretend Play","Baby & Infant","Games & Puzzles","Festive & Decor","Keepsakes & Gifts","Outdoor & Active"];
 const ORDER_STAGES = ["paid", "packed", "shipped", "out_for_delivery", "delivered"];
 const STAGE_LABELS = { pending: "Awaiting payment", paid: "Paid", packed: "Packed", shipped: "Shipped", out_for_delivery: "Out for delivery", delivered: "Delivered", cancelled: "Cancelled" };
+
 const FESTIVALS = [
   { id: "dussehra", name: "Dussehra / Navaratri", emoji: "🛕", prompts: [
     "A festive home with all nine Navadurga goddesses displayed, family doing puja happily together",
@@ -199,7 +200,6 @@ function Store({ session }) {
       supabase.from("store_settings").select("*").eq("id", 1).maybeSingle(),
       supabase.from("orders").select("*").eq("user_id", userId).order("created_at", { ascending: false }),
     ]);
-    
     setProducts(prod.data || []);
     setWallet(prof.data?.wallet ?? 0);
     setWalletLog(log.data || []);
@@ -244,7 +244,7 @@ function Store({ session }) {
     const { error } = await supabase.rpc("purchase_with_wallet", { p_items: items, p_total: subtotal });
     if (error) { flash(error.message); return; }
     await supabase.from("cart_items").delete().eq("user_id", userId);
-    setCart([]); setCheckoutOpen(false); flash("Paid from wallet 🎉"); setTab("shop");
+    setCart([]); setCheckoutOpen(false); flash("Paid from wallet 🎉"); loadAll(); setTab("orders");
   }
 
   if (loading) return <div style={S.center}><Loader2 className="spin" size={32} color="#C1432E" /></div>;
@@ -336,8 +336,9 @@ function Store({ session }) {
         )}
 
         {tab === "design" && <DesignStudio flash={flash} />}
+        {tab === "orders" && <MyOrders orders={myOrders} onShop={() => setTab("shop")} />}
         {tab === "calendar" && <RemindersPanel userId={userId} reminders={reminders} setReminders={setReminders} flash={flash} onShop={(occ) => { setActiveOcc(occ); setTab("occasions"); }} />}
-        {tab === "wallet" && <WalletPanel wallet={wallet} log={walletLog} onRecharge={() => setRechargeOpen(true)} hasUpi={!!settings?.upi_id?.trim()} />}
+        {tab === "wallet" && <WalletPanel wallet={wallet} log={walletLog} onRecharge={() => setRechargeOpen(true)} hasUpi={!!settings?.upi_id?.trim()} orders={myOrders} />}
         {tab === "cart" && <CartPanel items={cartDetailed} subtotal={subtotal} wallet={wallet} onSetQty={setItemQty} onCheckout={() => setCheckoutOpen(true)} onWalletPay={payWithWallet} onShop={() => setTab("shop")} />}
         {tab === "admin" && isAdmin && <AdminPanel flash={flash} onChanged={loadAll} products={products} settings={settings} />}
       </main>
@@ -349,7 +350,7 @@ function Store({ session }) {
       {checkoutOpen && (
         <CheckoutModal items={cartDetailed} subtotal={subtotal} settings={settings} wallet={wallet}
           onClose={() => setCheckoutOpen(false)} onConfirm={createPendingOrder} onWalletPay={payWithWallet}
-          onDone={async () => { await supabase.from("cart_items").delete().eq("user_id", userId); setCart([]); setCheckoutOpen(false); flash("Order placed — pending confirmation"); setTab("shop"); }} />
+          onDone={async () => { await supabase.from("cart_items").delete().eq("user_id", userId); setCart([]); setCheckoutOpen(false); flash("Order placed — pending confirmation"); loadAll(); setTab("orders"); }} />
       )}
       {rechargeOpen && <RechargeModal userId={userId} settings={settings} onClose={() => setRechargeOpen(false)} flash={flash} />}
 
@@ -543,6 +544,7 @@ function DesignStudio({ flash }) {
     </>
   );
 }
+
 function OrderTracker({ stage }) {
   if (stage === "cancelled") return <div style={{ ...S.trackPill, background: "#fdeceb", color: "#C1432E" }}>Cancelled</div>;
   if (stage === "pending") return <div style={{ ...S.trackPill, background: "#fff0e0", color: "#E8A33D" }}>Awaiting payment confirmation</div>;
@@ -590,6 +592,7 @@ function MyOrders({ orders, onShop }) {
     </>
   );
 }
+
 function CheckoutModal({ items, subtotal, settings, wallet, onClose, onConfirm, onWalletPay, onDone }) {
   const [order, setOrder] = useState(null); const [creating, setCreating] = useState(false);
   const hasUpi = settings?.upi_id?.trim(); const canWallet = wallet >= subtotal && subtotal > 0;
@@ -675,7 +678,7 @@ function AdminTopups({ flash }) {
 function AdminSettings({ flash, onChanged, settings }) {
   const [upiId, setUpiId] = useState(settings?.upi_id || ""); const [payeeName, setPayeeName] = useState(settings?.payee_name || ""); const [busy, setBusy] = useState(false);
   async function save() {
-    if (!upiId.trim()) { flash("7981166388-2@ybl"); return; }
+    if (!upiId.trim()) { flash("Enter your UPI ID"); return; }
     setBusy(true);
     const { error } = await supabase.from("store_settings").upsert({ id: 1, upi_id: upiId.trim(), payee_name: payeeName.trim(), updated_at: new Date().toISOString() });
     setBusy(false);
@@ -701,7 +704,7 @@ function AdminOrders({ flash }) {
   useEffect(() => { load(); }, []);
   async function load() { setLoading(true); const { data, error } = await supabase.from("orders").select("*").order("created_at", { ascending: false }); if (error) flash("Load failed: " + error.message); setOrders(data || []); setLoading(false); }
   async function approve(o) { setWorkingId(o.id); const { error } = await supabase.rpc("approve_order", { p_order_id: o.id }); setWorkingId(null); if (error) { flash("Approve failed: " + error.message); return; } flash(`Approved · ${money(o.total)}${o.total > 2000 ? " +₹50" : ""} credited ✓`); load(); }
-  async function cancel(id) { const { error } = await supabase.from("orders").update({ status: "cancelled" }).eq("id", id); if (error) flash("Failed: " + error.message); else { flash("Cancelled"); load(); } }
+  async function cancel(id) { const { error } = await supabase.from("orders").update({ status: "cancelled", stage: "cancelled" }).eq("id", id); if (error) flash("Failed: " + error.message); else { flash("Cancelled"); load(); } }
   async function setStage(o, stage) {
     const { error } = await supabase.from("orders").update({ stage }).eq("id", o.id);
     if (error) flash("Failed: " + error.message); else { flash("Updated to " + (STAGE_LABELS[stage] || stage)); load(); }
@@ -839,7 +842,6 @@ function RemindersPanel({ userId, reminders, setReminders, flash, onShop }) {
   }
   async function remove(id) { setReminders((r) => r.filter((x) => x.id !== id)); await supabase.from("reminders").delete().eq("id", id); }
 
-  // sort by next yearly occurrence
   const sorted = [...reminders].sort((a, b) => daysUntilYearly(a.remind_date) - daysUntilYearly(b.remind_date));
 
   return (
@@ -878,12 +880,9 @@ function RemindersPanel({ userId, reminders, setReminders, flash, onShop }) {
     </>
   );
 }
+
 function WalletPanel({ wallet, log, onRecharge, hasUpi, orders }) {
   return (
-    <h3 style={S.subhead}>Recent orders</h3>
-      {(!orders || orders.length === 0) ? <p style={{ color: "#9a8da5", fontSize: 14 }}>No orders yet.</p> : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>{orders.slice(0, 5).map((o) => <OrderCard key={o.id} o={o} />)}</div>
-      )}
     <>
       <h2 style={S.sectionTitle}>Your wallet</h2>
       <p style={S.sectionSub}>Recharge via UPI — the shop confirms your payment and your balance updates live.</p>
@@ -901,6 +900,10 @@ function WalletPanel({ wallet, log, onRecharge, hasUpi, orders }) {
           <div style={{ ...S.logAmt, color: e.amount < 0 ? "#C1432E" : "#1faa6b" }}>{e.amount < 0 ? "-" : "+"}{money(Math.abs(e.amount))}</div>
         </div>
       ))}</div>
+      <h3 style={S.subhead}>Recent orders</h3>
+      {(!orders || orders.length === 0) ? <p style={{ color: "#9a8da5", fontSize: 14 }}>No orders yet.</p> : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>{orders.slice(0, 5).map((o) => <OrderCard key={o.id} o={o} />)}</div>
+      )}
     </>
   );
 }
@@ -940,7 +943,6 @@ function Modal({ children, onClose, wide }) {
 function daysUntil(s) { const t = new Date(); t.setHours(0,0,0,0); const d = new Date(s); d.setHours(0,0,0,0); return Math.round((d - t) / 86400000); }
 function prettyDate(s) { return new Date(s).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }); }
 function prettyDateTime(s) { return new Date(s).toLocaleDateString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }); }
-// Next occurrence of a month/day, repeating yearly
 function nextYearlyDate(dateStr) {
   const orig = new Date(dateStr);
   const today = new Date(); today.setHours(0, 0, 0, 0);
@@ -949,21 +951,12 @@ function nextYearlyDate(dateStr) {
   if (next < today) next = new Date(today.getFullYear() + 1, orig.getMonth(), orig.getDate());
   return next;
 }
-
 function daysUntilYearly(dateStr) {
   const today = new Date(); today.setHours(0, 0, 0, 0);
   return Math.round((nextYearlyDate(dateStr) - today) / 86400000);
 }
+
 const S = {
-  walletNote: { display: "flex", alignItems: "center", gap: 7, fontSize: 13, color: "#7a7080", fontWeight: 700, margin: "12px 0 16px" },
-  myOrderCard: { background: "#fff", border: "1px solid #f0e3ec", borderRadius: 16, padding: 18 },
-  trackRow: { display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 4, position: "relative" },
-  trackStep: { flex: 1, display: "flex", flexDirection: "column", alignItems: "center", position: "relative", textAlign: "center" },
-  trackDot: { width: 26, height: 26, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 800, zIndex: 2 },
-  trackLabel: { fontSize: 10.5, marginTop: 6, lineHeight: 1.25, maxWidth: 64 },
-  trackLine: { position: "absolute", top: 13, left: "50%", width: "100%", height: 3, zIndex: 1 },
-  trackPill: { display: "inline-block", padding: "6px 14px", borderRadius: 999, fontSize: 13, fontWeight: 800 },
-  courierBox: { marginTop: 14, padding: "10px 14px", background: "#f6eef2", borderRadius: 12, fontSize: 13.5, color: "#5b5066", fontWeight: 600 },
   app: { fontFamily: "'Nunito', system-ui, sans-serif", background: "#FDF7F0", minHeight: "100vh", color: "#2a1a3e" },
   center: { minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#FDF7F0" },
   authWrap: { minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, background: "linear-gradient(120deg,#FFE9D6,#F3E0F0)" },
@@ -1029,6 +1022,14 @@ const S = {
   thumbs: { display: "flex", gap: 8, flexWrap: "wrap" },
   thumb: { width: 56, height: 56, objectFit: "cover", borderRadius: 10, cursor: "pointer", border: "2px solid transparent", opacity: .7 },
   thumbOn: { borderColor: "#C1432E", opacity: 1 },
+  myOrderCard: { background: "#fff", border: "1px solid #f0e3ec", borderRadius: 16, padding: 18 },
+  trackRow: { display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 4, position: "relative" },
+  trackStep: { flex: 1, display: "flex", flexDirection: "column", alignItems: "center", position: "relative", textAlign: "center" },
+  trackDot: { width: 26, height: 26, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 800, zIndex: 2 },
+  trackLabel: { fontSize: 10.5, marginTop: 6, lineHeight: 1.25, maxWidth: 64 },
+  trackLine: { position: "absolute", top: 13, left: "50%", width: "100%", height: 3, zIndex: 1 },
+  trackPill: { display: "inline-block", padding: "6px 14px", borderRadius: 999, fontSize: 13, fontWeight: 800 },
+  courierBox: { marginTop: 14, padding: "10px 14px", background: "#f6eef2", borderRadius: 12, fontSize: 13.5, color: "#5b5066", fontWeight: 600 },
   walletCard: { position: "relative", background: "linear-gradient(135deg,#C1432E,#8a5fb0)", borderRadius: 24, padding: "30px 30px 26px", color: "#fff", overflow: "hidden", maxWidth: 420 },
   walletGlow: { position: "absolute", width: 200, height: 200, background: "rgba(255,255,255,0.18)", borderRadius: "50%", top: -70, right: -40 },
   walletLabel: { display: "inline-flex", alignItems: "center", gap: 7, fontSize: 13, fontWeight: 700, opacity: 0.92 },
