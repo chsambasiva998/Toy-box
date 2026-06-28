@@ -4,14 +4,16 @@ import {
   Bell, Star, Trash2, Heart, Check, ArrowRight, Sparkles, Package,
   CreditCard, PartyPopper, CakeSlice, Baby, GraduationCap, LogOut, Loader2,
   QrCode, ClipboardList, Settings, Zap, MessageCircle, Wand2, Send, Download,
+  ChevronLeft, ChevronRight, IndianRupee,
 } from "lucide-react";
 import QRCode from "qrcode";
 import { supabase } from "./supabaseClient";
 
 /* ============================================================
    VAAYANAM — "A Telugu Way of Giving Love and Respect"
-   Toy & gift store · Supabase · INR · UPI QR · wallet
-   AI assistant + AI toy design (via Gemini Edge Functions)
+   Multi-image products + carousel · live qty totals
+   Wallet starts ₹0 · recharge via UPI QR (admin-approved)
+   AI assistant + AI toy design via Gemini Edge Functions
    ============================================================ */
 
 const OCCASIONS = [
@@ -21,138 +23,78 @@ const OCCASIONS = [
   { id: "holiday", label: "Holiday", icon: PartyPopper, hue: "#FFB454", tags: ["festive", "celebration"] },
 ];
 
-// ₹ currency
 const money = (n) => `₹${Number(n).toFixed(2)}`;
+const ADMIN_EMAIL = "YOUR_ADMIN_EMAIL@example.com";
+const NEW_DAYS = 14;
 
-// ⚠️ MUST equal your login email AND the email in your Supabase policies/functions.
-const ADMIN_EMAIL = "ch.sambasiva998@gmail.com";
+const CATEGORIES = ["STEM & Learning","Plush & Soft Toys","Classic & Wooden","Creative & Arts","Pretend Play","Baby & Infant","Games & Puzzles","Festive & Decor","Keepsakes & Gifts","Outdoor & Active"];
 
-const NEW_DAYS = 14; // items newer than this show a NEW badge
-
-/* ---- Festival theme catalog (editable) ----
-   Each festival has ready-made prompts for AI toy design. Add freely. */
 const FESTIVALS = [
   { id: "dussehra", name: "Dussehra / Navaratri", emoji: "🛕", prompts: [
-    "A festive home scene with all nine Navadurga goddesses displayed, family doing puja happily together",
+    "A festive home with all nine Navadurga goddesses displayed, family doing puja happily together",
     "Golu doll arrangement on tiered steps with little figurines, warm diya lighting",
-    "Goddess Durga on a lion defeating Mahishasura, colorful and child-friendly",
-    "Family dressed in traditional Telugu attire performing Saraswati puja with books and instruments",
-  ]},
+    "Goddess Durga on a lion defeating Mahishasura, colorful and child-friendly" ]},
   { id: "diwali", name: "Diwali / Deepavali", emoji: "🪔", prompts: [
     "Happy family bursting colorful crackers and sparklers in a courtyard at night",
     "Family performing Lakshmi puja with diyas, rangoli, and sweets",
-    "A row of glowing clay diyas with marigold decorations",
-    "Children in festive clothes holding sparklers, joyful Diwali night scene",
-  ]},
-  { id: "sankranti", name: "Makar Sankranti / Pongal", emoji: "🪁", prompts: [
+    "A row of glowing clay diyas with marigold decorations" ]},
+  { id: "sankranti", name: "Sankranti / Pongal", emoji: "🪁", prompts: [
     "Children flying colorful kites on rooftops under a bright sky",
-    "Pongal pot boiling over with decorated sugarcane and turmeric plants",
-    "Rangoli muggu with pumpkin flowers, traditional Sankranti courtyard",
-    "Gangireddu decorated bull with a festive village family",
-  ]},
+    "Pongal pot boiling over with decorated sugarcane and turmeric plants" ]},
   { id: "holi", name: "Holi", emoji: "🎨", prompts: [
     "Joyful children throwing colorful gulal powder, vibrant Holi celebration",
-    "Family smeared in rainbow colors playing with water guns, happy faces",
-    "Pile of colorful gulal mounds with pichkari water guns",
-  ]},
-  { id: "ugadi", name: "Ugadi (Telugu New Year)", emoji: "🌿", prompts: [
-    "Telugu family celebrating Ugadi with mango leaf torans and Ugadi pachadi",
-    "Festive plate of Ugadi pachadi with neem flowers and jaggery, decorated table",
-  ]},
+    "Family smeared in rainbow colors playing with water guns" ]},
+  { id: "ugadi", name: "Ugadi", emoji: "🌿", prompts: [
+    "Telugu family celebrating Ugadi with mango leaf torans and Ugadi pachadi" ]},
   { id: "ganesh", name: "Ganesh Chaturthi", emoji: "🐘", prompts: [
-    "Cute Lord Ganesha idol with modak sweets, family doing puja joyfully",
-    "Colorful Ganesha pandal with decorations and happy devotees",
-  ]},
-  { id: "rakhi", name: "Raksha Bandhan", emoji: "🧵", prompts: [
-    "Sister tying a colorful rakhi on brother's wrist, warm family moment",
-    "Decorative rakhi thread with sweets on a festive plate",
-  ]},
-  { id: "krishna", name: "Krishna Janmashtami", emoji: "🦚", prompts: [
-    "Baby Krishna with butter pot, peacock feather, playful and cute",
-    "Dahi handi celebration with children forming a human pyramid",
-  ]},
-  { id: "onam", name: "Onam", emoji: "🌺", prompts: [
-    "Elaborate Pookalam flower rangoli with family in traditional Kerala attire",
-    "Onam Sadhya feast on banana leaf with happy family",
-  ]},
+    "Cute Lord Ganesha idol with modak sweets, family doing puja joyfully" ]},
   { id: "christmas", name: "Christmas", emoji: "🎄", prompts: [
     "Decorated Christmas tree with family exchanging gifts by a fireplace",
-    "Jolly Santa Claus with a sack of toys and reindeer",
-    "Snowy village scene with carolers and twinkling lights",
-  ]},
-  { id: "newyear", name: "New Year", emoji: "🎆", prompts: [
-    "Fireworks over a city skyline with a cheering family celebrating midnight",
-    "Party scene with confetti, balloons, and a countdown clock",
-  ]},
+    "Jolly Santa Claus with a sack of toys and reindeer" ]},
   { id: "eid", name: "Eid", emoji: "🌙", prompts: [
-    "Family in festive attire celebrating Eid with crescent moon and lanterns",
-    "Decorated table with sweets and dates, warm Eid gathering",
-  ]},
-  { id: "halloween", name: "Halloween", emoji: "🎃", prompts: [
-    "Friendly jack-o'-lantern pumpkins with children in cute costumes",
-    "Playful haunted house scene, not scary, child-friendly",
-  ]},
-  { id: "thanksgiving", name: "Thanksgiving", emoji: "🦃", prompts: [
-    "Family gathered around a Thanksgiving feast table, grateful and happy",
-    "Cornucopia overflowing with autumn harvest and pumpkins",
-  ]},
-  { id: "lunar", name: "Lunar New Year", emoji: "🧧", prompts: [
-    "Red lanterns and dragon dance with a joyful family celebration",
-    "Child holding red envelopes with festive Lunar New Year decorations",
-  ]},
-  { id: "hanukkah", name: "Hanukkah", emoji: "🕎", prompts: [
-    "Family lighting the menorah together, warm candlelit celebration",
-    "Dreidels and gelt on a festive table, joyful Hanukkah scene",
-  ]},
+    "Family in festive attire celebrating Eid with crescent moon and lanterns" ]},
+  { id: "newyear", name: "New Year", emoji: "🎆", prompts: [
+    "Fireworks over a skyline with a cheering family celebrating midnight" ]},
 ];
 
 const EXTRA_PROMPT_IDEAS = [
-  "A plush teddy bear wearing traditional Telugu attire",
-  "A wooden educational puzzle shaped like India's map",
-  "A toy train decorated for a festival journey",
-  "A set of stacking dolls themed as Indian classical dancers",
-  "A soft elephant toy with colorful festival ornaments",
-  "A build-it-yourself temple model kit for kids",
-  "A rocket toy with rangoli-patterned fins",
-  "A robot toy dressed as a dhol drummer",
+  "A plush teddy bear in traditional Telugu attire",
+  "A wooden puzzle shaped like India's map",
   "A doll house decorated for Diwali",
-  "A board game about Indian festivals and traditions",
+  "A robot toy dressed as a dhol drummer",
+  "A board game about Indian festivals",
 ];
 
 function buildUpiString({ upiId, payeeName, amount, note }) {
-  const params = new URLSearchParams({
-    pa: upiId, pn: payeeName || "Vaayanam",
-    am: Number(amount).toFixed(2), cu: "INR", tn: note || "Vaayanam order",
-  });
+  const params = new URLSearchParams({ pa: upiId, pn: payeeName || "Vaayanam", am: Number(amount).toFixed(2), cu: "INR", tn: note || "Vaayanam" });
   return `upi://pay?${params.toString()}`;
 }
-
-function isNew(createdAt) {
-  if (!createdAt) return false;
-  return (Date.now() - new Date(createdAt).getTime()) / 86400000 <= NEW_DAYS;
-}
-
+function isNew(c) { return c ? (Date.now() - new Date(c).getTime()) / 86400000 <= NEW_DAYS : false; }
 function suggestForOccasion(occId, products) {
   const occ = OCCASIONS.find((o) => o.id === occId);
   if (!occ) return products.slice(0, 6);
-  return [...products]
-    .map((p) => ({ p, score: (p.tags || []).filter((t) => occ.tags.includes(t)).length }))
-    .sort((a, b) => b.score - a.score || b.p.rating - a.p.rating)
-    .slice(0, 6).map((x) => x.p);
+  return [...products].map((p) => ({ p, score: (p.tags || []).filter((t) => occ.tags.includes(t)).length }))
+    .sort((a, b) => b.score - a.score || b.p.rating - a.p.rating).slice(0, 6).map((x) => x.p);
 }
 
-/* ---- Flicker-free QR: memoized, generates once per value ---- */
 function UpiQR({ value, size = 210 }) {
   const [dataUrl, setDataUrl] = useState(null);
   useEffect(() => {
-    let alive = true;
-    setDataUrl(null);
+    let alive = true; setDataUrl(null);
     QRCode.toDataURL(value, { width: size, margin: 1, color: { dark: "#2a1a3e", light: "#ffffff" } })
       .then((u) => { if (alive) setDataUrl(u); }).catch(() => { if (alive) setDataUrl(null); });
     return () => { alive = false; };
   }, [value, size]);
   if (!dataUrl) return <div style={{ width: size, height: size, display: "flex", alignItems: "center", justifyContent: "center" }}><Loader2 className="spin" size={24} color="#C1432E" /></div>;
-  return <img src={dataUrl} alt="UPI QR code" width={size} height={size} style={{ borderRadius: 12 }} />;
+  return <img src={dataUrl} alt="UPI QR" width={size} height={size} style={{ borderRadius: 12 }} />;
+}
+
+/* helper: all images for a product (gallery first, else single image_url, else emoji) */
+function imagesFor(p) {
+  const gallery = (p.product_images || []).slice().sort((a, b) => a.sort - b.sort).map((g) => g.url);
+  if (gallery.length) return gallery;
+  if (p.image_url) return [p.image_url];
+  return [];
 }
 
 /* ===================== ROOT ===================== */
@@ -171,52 +113,31 @@ export default function App() {
 /* ===================== AUTH ===================== */
 function AuthScreen() {
   const [mode, setMode] = useState("signin");
-  const [email, setEmail] = useState("");
-  const [pass, setPass] = useState("");
-  const [msg, setMsg] = useState(null);
-  const [busy, setBusy] = useState(false);
-
+  const [email, setEmail] = useState(""); const [pass, setPass] = useState("");
+  const [msg, setMsg] = useState(null); const [busy, setBusy] = useState(false);
   async function submit() {
     setBusy(true); setMsg(null);
     try {
-      if (mode === "reset") {
-        const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin });
-        if (error) throw error; setMsg("Password reset link sent — check your email.");
-      } else if (mode === "signin") {
-        const { error } = await supabase.auth.signInWithPassword({ email, password: pass });
-        if (error) throw error;
-      } else {
-        const { error } = await supabase.auth.signUp({ email, password: pass });
-        if (error) throw error; setMsg("Check your email to confirm, then sign in.");
-      }
+      if (mode === "reset") { const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin }); if (error) throw error; setMsg("Reset link sent — check your email."); }
+      else if (mode === "signin") { const { error } = await supabase.auth.signInWithPassword({ email, password: pass }); if (error) throw error; }
+      else { const { error } = await supabase.auth.signUp({ email, password: pass }); if (error) throw error; setMsg("Check your email to confirm, then sign in."); }
     } catch (e) { setMsg(e.message); }
     setBusy(false);
   }
-
   return (
-    <div style={S.app}>
-      <style>{CSS}</style>
-      <div style={S.authWrap}>
-        <div style={S.authCard}>
-          <div style={{ fontSize: 40, textAlign: "center" }}>🪔</div>
-          <div style={S.authBrand}>Vaayanam</div>
-          <div style={S.authMotto}>A Telugu Way of Giving Love and Respect</div>
-          <div style={S.authTag}>{mode === "signin" ? "Welcome back." : mode === "signup" ? "Create your account." : "Reset your password."}</div>
-          <input style={S.input} type="email" placeholder="you@email.com" value={email} onChange={(e) => setEmail(e.target.value)} />
-          {mode !== "reset" && <input style={S.input} type="password" placeholder="Password (6+ chars)" value={pass} onChange={(e) => setPass(e.target.value)} />}
-          <button className="cta full" disabled={busy} onClick={submit}>
-            {busy ? <Loader2 className="spin" size={16} /> : mode === "signin" ? "Sign in" : mode === "signup" ? "Sign up" : "Send reset link"}
-          </button>
-          {msg && <div style={S.authMsg}>{msg}</div>}
-          {mode === "signin" && <div style={S.authSwitch}><button className="linkbtn" onClick={() => { setMode("reset"); setMsg(null); }}>Forgot password?</button></div>}
-          <div style={S.authSwitch}>
-            {mode === "signin" ? "New here? " : "Have an account? "}
-            <button className="linkbtn" onClick={() => { setMode(mode === "signin" ? "signup" : "signin"); setMsg(null); }}>
-              {mode === "signin" ? "Create one" : "Sign in"}
-            </button>
-          </div>
-        </div>
-      </div>
+    <div style={S.app}><style>{CSS}</style>
+      <div style={S.authWrap}><div style={S.authCard}>
+        <div style={{ fontSize: 40, textAlign: "center" }}>🪔</div>
+        <div style={S.authBrand}>Vaayanam</div>
+        <div style={S.authMotto}>A Telugu Way of Giving Love and Respect</div>
+        <div style={S.authTag}>{mode === "signin" ? "Welcome back." : mode === "signup" ? "Create your account." : "Reset your password."}</div>
+        <input style={S.input} type="email" placeholder="you@email.com" value={email} onChange={(e) => setEmail(e.target.value)} />
+        {mode !== "reset" && <input style={S.input} type="password" placeholder="Password (6+ chars)" value={pass} onChange={(e) => setPass(e.target.value)} />}
+        <button className="cta full" disabled={busy} onClick={submit}>{busy ? <Loader2 className="spin" size={16} /> : mode === "signin" ? "Sign in" : mode === "signup" ? "Sign up" : "Send reset link"}</button>
+        {msg && <div style={S.authMsg}>{msg}</div>}
+        {mode === "signin" && <div style={S.authSwitch}><button className="linkbtn" onClick={() => { setMode("reset"); setMsg(null); }}>Forgot password?</button></div>}
+        <div style={S.authSwitch}>{mode === "signin" ? "New here? " : "Have an account? "}<button className="linkbtn" onClick={() => { setMode(mode === "signin" ? "signup" : "signin"); setMsg(null); }}>{mode === "signin" ? "Create one" : "Sign in"}</button></div>
+      </div></div>
     </div>
   );
 }
@@ -228,7 +149,6 @@ function Store({ session }) {
   const [tab, setTab] = useState("shop");
   const [query, setQuery] = useState("");
   const [activeOcc, setActiveOcc] = useState("birthday");
-
   const [products, setProducts] = useState([]);
   const [cart, setCart] = useState([]);
   const [wallet, setWallet] = useState(0);
@@ -240,16 +160,16 @@ function Store({ session }) {
   const [toast, setToast] = useState(null);
   const [checkoutOpen, setCheckoutOpen] = useState(false);
   const [aiOpen, setAiOpen] = useState(false);
+  const [detailProduct, setDetailProduct] = useState(null);
+  const [rechargeOpen, setRechargeOpen] = useState(false);
 
   function flash(m) { setToast(m); setTimeout(() => setToast(null), 2800); }
 
   useEffect(() => { loadAll(); }, []);
   useEffect(() => {
     const ch = supabase.channel("wallet-rt")
-      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "profiles", filter: `id=eq.${userId}` },
-        (p) => { if (p.new?.wallet != null) setWallet(Number(p.new.wallet)); })
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "wallet_log", filter: `user_id=eq.${userId}` },
-        (p) => setWalletLog((l) => [p.new, ...l]))
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "profiles", filter: `id=eq.${userId}` }, (p) => { if (p.new?.wallet != null) setWallet(Number(p.new.wallet)); })
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "wallet_log", filter: `user_id=eq.${userId}` }, (p) => setWalletLog((l) => [p.new, ...l]))
       .subscribe();
     return () => { supabase.removeChannel(ch); };
   }, [userId]);
@@ -257,7 +177,7 @@ function Store({ session }) {
   async function loadAll() {
     setLoading(true);
     const [prod, prof, log, c, rem, setg] = await Promise.all([
-      supabase.from("products").select("*").order("created_at", { ascending: false }),
+      supabase.from("products").select("*, product_images(*)").order("created_at", { ascending: false }),
       supabase.from("profiles").select("wallet").eq("id", userId).single(),
       supabase.from("wallet_log").select("*").eq("user_id", userId).order("created_at", { ascending: false }),
       supabase.from("cart_items").select("*").eq("user_id", userId),
@@ -295,19 +215,12 @@ function Store({ session }) {
   }
   function toggleFav(id) { setFavorites((f) => { const n = new Set(f); n.has(id) ? n.delete(id) : n.add(id); return n; }); }
 
-  async function topUp(amt) {
-    const next = wallet + amt; setWallet(next); flash(`${money(amt)} added`);
-    await supabase.from("profiles").update({ wallet: next }).eq("id", userId);
-    await supabase.from("wallet_log").insert({ user_id: userId, type: "Top-up", amount: amt });
-  }
-
   async function createPendingOrder() {
     const items = cartDetailed.map((i) => ({ name: i.name, qty: i.qty, price: i.price }));
     const { data, error } = await supabase.from("orders").insert({ user_id: userId, total: subtotal, items, status: "pending" }).select().single();
     if (error) { flash(error.message); return null; }
     return data;
   }
-
   async function payWithWallet() {
     if (subtotal <= 0) return;
     const items = cartDetailed.map((i) => ({ name: i.name, qty: i.qty, price: i.price }));
@@ -320,27 +233,19 @@ function Store({ session }) {
   if (loading) return <div style={S.center}><Loader2 className="spin" size={32} color="#C1432E" /></div>;
 
   const navItems = [
-    { id: "shop", label: "Shop", icon: Package },
-    { id: "occasions", label: "Occasions", icon: Gift },
-    { id: "design", label: "Design a Toy", icon: Wand2 },
-    { id: "calendar", label: "Reminders", icon: Calendar },
+    { id: "shop", label: "Shop", icon: Package }, { id: "occasions", label: "Occasions", icon: Gift },
+    { id: "design", label: "Design a Toy", icon: Wand2 }, { id: "calendar", label: "Reminders", icon: Calendar },
     { id: "wallet", label: "Wallet", icon: Wallet },
   ];
 
   return (
-    <div style={S.app}>
-      <style>{CSS}</style>
+    <div style={S.app}><style>{CSS}</style>
       <header style={S.header}>
-        <div style={S.brand}>
-          <span style={S.logoMark}>🪔</span>
-          <div><div style={S.brandName}>Vaayanam</div><div style={S.brandTag}>A Telugu Way of Giving Love and Respect</div></div>
-        </div>
+        <div style={S.brand}><span style={S.logoMark}>🪔</span><div><div style={S.brandName}>Vaayanam</div><div style={S.brandTag}>A Telugu Way of Giving Love and Respect</div></div></div>
         <nav style={S.nav}>
-          {navItems.map((t) => (
-            <button key={t.id} className={`navbtn ${tab === t.id ? "navbtn-on" : ""}`} onClick={() => setTab(t.id)}><t.icon size={17} /> {t.label}</button>
-          ))}
+          {navItems.map((t) => <button key={t.id} className={`navbtn ${tab === t.id ? "navbtn-on" : ""}`} onClick={() => setTab(t.id)}><t.icon size={17} /> {t.label}</button>)}
           {isAdmin && <button className={`navbtn ${tab === "admin" ? "navbtn-on" : ""}`} onClick={() => setTab("admin")}><Settings size={17} /> Admin</button>}
-          <button className="walletchip" onClick={() => setTab("wallet")} title="Wallet balance"><Wallet size={15} /> {money(wallet)}</button>
+          <button className="walletchip" onClick={() => setTab("wallet")}><Wallet size={15} /> {money(wallet)}</button>
           <button className="cartbtn" onClick={() => setTab("cart")}><ShoppingCart size={18} />{cartCount > 0 && <span className="badge">{cartCount}</span>}</button>
           <button className="iconbtn" title="Sign out" onClick={() => supabase.auth.signOut()}><LogOut size={18} /></button>
         </nav>
@@ -353,7 +258,7 @@ function Store({ session }) {
               <div style={S.heroInner}>
                 <div style={S.heroEyebrow}><Sparkles size={14} /> Gifts with meaning</div>
                 <h1 style={S.heroTitle}>Give love and respect, the Telugu way.</h1>
-                <p style={S.heroSub}>Toys, keepsakes, and festive gifts — and now, design your very own toy for any festival with AI.</p>
+                <p style={S.heroSub}>Toys, keepsakes, and festive gifts — and design your very own toy for any festival with AI.</p>
                 <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
                   <button className="cta" onClick={() => setTab("occasions")}>Shop by occasion <ArrowRight size={16} /></button>
                   <button className="ghostbtn" style={{ padding: "13px 20px" }} onClick={() => setTab("design")}><Wand2 size={16} /> Design a toy</button>
@@ -366,11 +271,11 @@ function Store({ session }) {
               <span style={S.resultCount}>{results.length} items</span>
             </div>
             {results.length === 0 ? (
-              <div style={S.empty}><Package size={32} color="#d6c9dd" /><p>No toys in the shop yet.{isAdmin ? " Add some from the Admin tab." : ""}</p></div>
+              <div style={S.empty}><Package size={32} color="#d6c9dd" /><p>No toys yet.{isAdmin ? " Add some from the Admin tab." : ""}</p></div>
             ) : (
               <div style={S.grid}>{results.map((p) => (
                 <ProductCard key={p.id} p={p} qty={qtyOf(p.id)} fav={favorites.has(p.id)} onFav={() => toggleFav(p.id)}
-                  onInc={() => setItemQty(p.id, qtyOf(p.id) + 1)} onDec={() => setItemQty(p.id, qtyOf(p.id) - 1)} settings={settings} />
+                  onInc={() => setItemQty(p.id, qtyOf(p.id) + 1)} onDec={() => setItemQty(p.id, qtyOf(p.id) - 1)} onOpen={() => setDetailProduct(p)} />
               ))}</div>
             )}
           </>
@@ -382,39 +287,38 @@ function Store({ session }) {
             <p style={S.sectionSub}>Pick a moment and we'll match the perfect gifts.</p>
             <div style={S.occRow}>{OCCASIONS.map((o) => (
               <button key={o.id} className={`occchip ${activeOcc === o.id ? "occchip-on" : ""}`} style={activeOcc === o.id ? { borderColor: o.hue, background: o.hue + "1a" } : {}} onClick={() => setActiveOcc(o.id)}>
-                <span style={{ ...S.occIcon, background: o.hue + "22", color: o.hue }}><o.icon size={20} /></span>{o.label}
-              </button>
+                <span style={{ ...S.occIcon, background: o.hue + "22", color: o.hue }}><o.icon size={20} /></span>{o.label}</button>
             ))}</div>
             <div style={S.suggestHead}><Sparkles size={16} color="#C1432E" /><span>Curated picks for {OCCASIONS.find((o) => o.id === activeOcc)?.label}</span></div>
-            {suggestions.length === 0 ? (
-              <div style={S.empty}><Gift size={32} color="#d6c9dd" /><p>Add toys to see occasion picks.</p></div>
-            ) : (
+            {suggestions.length === 0 ? <div style={S.empty}><Gift size={32} color="#d6c9dd" /><p>Add toys to see picks.</p></div> : (
               <div style={S.grid}>{suggestions.map((p) => (
                 <ProductCard key={p.id} p={p} qty={qtyOf(p.id)} fav={favorites.has(p.id)} onFav={() => toggleFav(p.id)}
-                  onInc={() => setItemQty(p.id, qtyOf(p.id) + 1)} onDec={() => setItemQty(p.id, qtyOf(p.id) - 1)} settings={settings} />
+                  onInc={() => setItemQty(p.id, qtyOf(p.id) + 1)} onDec={() => setItemQty(p.id, qtyOf(p.id) - 1)} onOpen={() => setDetailProduct(p)} />
               ))}</div>
             )}
           </>
         )}
 
         {tab === "design" && <DesignStudio flash={flash} />}
-
         {tab === "calendar" && <RemindersPanel userId={userId} reminders={reminders} setReminders={setReminders} flash={flash} onShop={(occ) => { setActiveOcc(occ); setTab("occasions"); }} />}
-
-        {tab === "wallet" && <WalletPanel wallet={wallet} log={walletLog} onTopUp={topUp} />}
-
+        {tab === "wallet" && <WalletPanel wallet={wallet} log={walletLog} onRecharge={() => setRechargeOpen(true)} hasUpi={!!settings?.upi_id?.trim()} />}
         {tab === "cart" && <CartPanel items={cartDetailed} subtotal={subtotal} wallet={wallet} onSetQty={setItemQty} onCheckout={() => setCheckoutOpen(true)} onWalletPay={payWithWallet} onShop={() => setTab("shop")} />}
-
         {tab === "admin" && isAdmin && <AdminPanel flash={flash} onChanged={loadAll} products={products} settings={settings} />}
       </main>
+
+      {detailProduct && (
+        <ProductDetail p={detailProduct} qty={qtyOf(detailProduct.id)} onClose={() => setDetailProduct(null)}
+          onInc={() => setItemQty(detailProduct.id, qtyOf(detailProduct.id) + 1)} onDec={() => setItemQty(detailProduct.id, qtyOf(detailProduct.id) - 1)} />
+      )}
 
       {checkoutOpen && (
         <CheckoutModal items={cartDetailed} subtotal={subtotal} settings={settings} wallet={wallet}
           onClose={() => setCheckoutOpen(false)} onConfirm={createPendingOrder} onWalletPay={payWithWallet}
-          onDone={async () => { await supabase.from("cart_items").delete().eq("user_id", userId); setCart([]); setCheckoutOpen(false); flash("Order placed — pending payment confirmation"); setTab("shop"); }} />
+          onDone={async () => { await supabase.from("cart_items").delete().eq("user_id", userId); setCart([]); setCheckoutOpen(false); flash("Order placed — pending confirmation"); setTab("shop"); }} />
       )}
 
-      {/* Floating AI assistant */}
+      {rechargeOpen && <RechargeModal userId={userId} settings={settings} onClose={() => setRechargeOpen(false)} flash={flash} />}
+
       <button className="aifab" onClick={() => setAiOpen(true)} title="Ask Vaayanam AI"><MessageCircle size={22} /></button>
       {aiOpen && <AIAssistant products={products} onClose={() => setAiOpen(false)} />}
 
@@ -424,588 +328,21 @@ function Store({ session }) {
   );
 }
 
-/* ===================== AI ASSISTANT ===================== */
-function AIAssistant({ products, onClose }) {
-  const [messages, setMessages] = useState([{ role: "assistant", content: "Namaste! 🪔 I'm your Vaayanam assistant. Ask me about toys, gifts, or which present suits a festival or occasion." }]);
-  const [input, setInput] = useState("");
-  const [busy, setBusy] = useState(false);
-  const endRef = useRef(null);
-  useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages, busy]);
-
-  async function send() {
-    const text = input.trim(); if (!text || busy) return;
-    const next = [...messages, { role: "user", content: text }];
-    setMessages(next); setInput(""); setBusy(true);
-    try {
-      const { data, error } = await supabase.functions.invoke("ai-assistant", {
-        body: { messages: next, products: products.map((p) => ({ name: p.name, price: p.price, category: p.category, age_range: p.age_range, description: p.description })) },
-      });
-      if (error) throw error;
-      setMessages((m) => [...m, { role: "assistant", content: data.text || "Sorry, I couldn't respond." }]);
-    } catch (e) {
-      setMessages((m) => [...m, { role: "assistant", content: "I'm having trouble connecting right now. Please try again." }]);
-    } finally { setBusy(false); }
-  }
-
-  return (
-    <div className="aiPanel">
-      <div style={S.aiHead}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 900 }}><MessageCircle size={18} color="#C1432E" /> Vaayanam Assistant</div>
-        <button className="iconbtn" onClick={onClose}><X size={18} /></button>
-      </div>
-      <div style={S.aiBody}>
-        {messages.map((m, i) => (
-          <div key={i} style={{ ...S.bubble, ...(m.role === "user" ? S.bubbleUser : S.bubbleBot) }}>{m.content}</div>
-        ))}
-        {busy && <div style={{ ...S.bubble, ...S.bubbleBot }}><Loader2 className="spin" size={16} /></div>}
-        <div ref={endRef} />
-      </div>
-      <div style={S.aiInputRow}>
-        <input style={{ ...S.input, flex: 1 }} placeholder="Ask about a gift…" value={input}
-          onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && send()} />
-        <button className="cta" style={{ padding: "11px 16px" }} disabled={busy} onClick={send}><Send size={16} /></button>
-      </div>
-    </div>
-  );
-}
-
-/* ===================== DESIGN STUDIO ===================== */
-function DesignStudio({ flash }) {
-  const [festival, setFestival] = useState(FESTIVALS[0].id);
-  const [prompt, setPrompt] = useState("");
-  const [image, setImage] = useState(null);
-  const [busy, setBusy] = useState(false);
-  const fest = FESTIVALS.find((f) => f.id === festival);
-
-  async function generate() {
-    const p = prompt.trim(); if (!p) { flash("Type or pick a prompt first"); return; }
-    setBusy(true); setImage(null);
-    try {
-      const { data, error } = await supabase.functions.invoke("ai-toy-image", { body: { prompt: p } });
-      if (error) throw error;
-      if (data?.image) setImage(data.image); else throw new Error(data?.error || "No image returned");
-    } catch (e) { flash("Image generation failed: " + (e.message || e)); }
-    finally { setBusy(false); }
-  }
-
-  return (
-    <>
-      <h2 style={S.sectionTitle}>Design your own toy <Wand2 size={22} style={{ verticalAlign: "-3px" }} /></h2>
-      <p style={S.sectionSub}>Pick a festival theme or write your own idea. We'll generate a concept image you can share with our toy makers to customize.</p>
-
-      <div style={S.adminLabel}>Festival theme</div>
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 18 }}>
-        {FESTIVALS.map((f) => (
-          <button key={f.id} className={`festchip ${festival === f.id ? "festchip-on" : ""}`} onClick={() => setFestival(f.id)}>
-            <span style={{ fontSize: 16 }}>{f.emoji}</span> {f.name}
-          </button>
-        ))}
-      </div>
-
-      <div style={S.adminLabel}>Theme prompts for {fest.name} — tap to use</div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 16 }}>
-        {fest.prompts.map((pr, i) => (
-          <button key={i} className="promptchip" onClick={() => setPrompt(pr)}>{pr}</button>
-        ))}
-      </div>
-
-      <div style={S.adminLabel}>More ideas</div>
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
-        {EXTRA_PROMPT_IDEAS.map((pr, i) => (
-          <button key={i} className="tagchip" onClick={() => setPrompt(pr)} style={{ textTransform: "none" }}>{pr}</button>
-        ))}
-      </div>
-
-      <textarea style={{ ...S.input, width: "100%", minHeight: 80, resize: "vertical", marginBottom: 12 }}
-        placeholder="Describe your toy idea…" value={prompt} onChange={(e) => setPrompt(e.target.value)} />
-      <button className="cta" disabled={busy} onClick={generate}>{busy ? <Loader2 className="spin" size={16} /> : <Wand2 size={16} />} Generate concept</button>
-
-      {busy && <div style={{ ...S.empty, padding: "40px 0" }}><Loader2 className="spin" size={28} color="#C1432E" /><p>Designing your toy…</p></div>}
-      {image && (
-        <div style={{ marginTop: 24, textAlign: "center" }}>
-          <img src={image} alt="Generated toy concept" style={{ maxWidth: "100%", width: 380, borderRadius: 18, border: "1px solid #efe3f0" }} />
-          <div style={{ marginTop: 12 }}>
-            <a className="cta" href={image} download="vaayanam-toy-concept.png" style={{ textDecoration: "none" }}><Download size={16} /> Download concept</a>
-          </div>
-          <p style={S.qrNote}>This is an AI concept image for inspiration. Share it with our toy makers to customize a real piece.</p>
-        </div>
-      )}
-    </>
-  );
-}
-
-/* ===================== CHECKOUT ===================== */
-function CheckoutModal({ items, subtotal, settings, wallet, onClose, onConfirm, onWalletPay, onDone }) {
-  const [order, setOrder] = useState(null);
-  const [creating, setCreating] = useState(false);
-  const hasUpi = settings?.upi_id?.trim();
-  const canWallet = wallet >= subtotal && subtotal > 0;
-  async function startQR() { setCreating(true); const o = await onConfirm(); setCreating(false); if (o) setOrder(o); }
-  const upiString = useMemo(() => hasUpi ? buildUpiString({ upiId: settings.upi_id, payeeName: settings.payee_name, amount: subtotal, note: order ? `Vaayanam #${order.id}` : "Vaayanam cart" }) : "", [hasUpi, settings, subtotal, order]);
-
-  return (
-    <Modal onClose={onClose}>
-      <h3 style={S.modalTitle}>Checkout</h3>
-      <div style={S.checkoutRows}>{items.map((i) => (<div key={i.id} style={S.checkoutRow}><span>{i.emoji} {i.name} ×{i.qty}</span><span>{money(i.price * i.qty)}</span></div>))}</div>
-      <div style={S.payBox}>
-        <div style={{ ...S.payLine, ...S.payTotal }}><span>Total</span><span>{money(subtotal)}</span></div>
-        <div style={S.payLine}><span>Wallet balance</span><span>{money(wallet)}</span></div>
-        {subtotal > 2000 && <div style={{ ...S.payLine, color: "#1faa6b", fontWeight: 800 }}><span>🎁 Reward on approval</span><span>+₹50 to wallet</span></div>}
-      </div>
-      {canWallet && <button className="cta full" style={{ marginBottom: 12 }} onClick={onWalletPay}><Zap size={16} /> Pay {money(subtotal)} from wallet</button>}
-      {!hasUpi ? (
-        <div style={S.warn}>No UPI ID set up yet. {canWallet ? "You can pay from wallet above." : "Ask the shop to add one."}</div>
-      ) : !order ? (
-        <button className="ghostbtn" style={{ width: "100%", padding: 13 }} disabled={creating} onClick={startQR}>{creating ? <Loader2 className="spin" size={16} /> : <QrCode size={16} />} Pay by UPI QR instead</button>
-      ) : (
-        <div style={{ textAlign: "center" }}>
-          <div style={S.qrWrap}><UpiQR value={upiString} size={210} /></div>
-          <div style={S.qrHint}>Scan to pay {money(subtotal)} to <b>{settings.upi_id}</b></div>
-          <a className="cta full" href={upiString} style={{ textDecoration: "none", marginBottom: 10 }}>Open in UPI app</a>
-          <p style={S.qrNote}>Order #{order.id} is <b>pending</b>. Once the shop confirms your UPI payment, the amount{subtotal > 2000 ? " plus ₹50 reward" : ""} is credited to your wallet.</p>
-          <button className="ghostbtn" style={{ width: "100%", padding: 12 }} onClick={onDone}>I've paid — place order</button>
-        </div>
-      )}
-    </Modal>
-  );
-}
-
-/* ===================== PRODUCT CARD (qty steppers + NEW badge) ===================== */
-function ProductCard({ p, qty, fav, onFav, onInc, onDec, settings }) {
-  const [showQR, setShowQR] = useState(false);
-  const hasUpi = settings?.upi_id?.trim();
-  const upiString = useMemo(() => hasUpi ? buildUpiString({ upiId: settings.upi_id, payeeName: settings.payee_name, amount: p.price, note: `Vaayanam ${p.name}` }) : "", [hasUpi, settings, p]);
+/* ===================== PRODUCT CARD ===================== */
+function ProductCard({ p, qty, fav, onFav, onInc, onDec, onOpen }) {
+  const imgs = imagesFor(p);
   return (
     <div className="card">
       {isNew(p.created_at) && <span className="newbadge">NEW</span>}
-      <button className={`favbtn ${fav ? "favon" : ""}`} onClick={onFav} aria-label="favorite"><Heart size={16} fill={fav ? "#C1432E" : "none"} /></button>
-      <div className="cardArt">{p.image_url ? <img src={p.image_url} alt={p.name} className="cardImg" /> : p.emoji}</div>
+      <button className={`favbtn ${fav ? "favon" : ""}`} onClick={(e) => { e.stopPropagation(); onFav(); }}><Heart size={16} fill={fav ? "#C1432E" : "none"} /></button>
+      <div className="cardArt" style={{ cursor: "pointer" }} onClick={onOpen}>
+        {imgs.length ? <img src={imgs[0]} alt={p.name} className="cardImg" /> : p.emoji}
+        {imgs.length > 1 && <span className="imgcount">{imgs.length} 📷</span>}
+      </div>
       <div style={S.cardBody}>
         <div style={S.cardTop}><span style={S.cat}>{p.category}</span><span style={S.rating}><Star size={12} fill="#E8A33D" color="#E8A33D" /> {p.rating}</span></div>
-        <div style={S.cardName}>{p.name}</div>
+        <div style={S.cardName} onClick={onOpen}>{p.name}</div>
         {p.description && <div style={S.cardDesc}>{p.description}</div>}
         <div style={S.cardMeta}>Ages {p.age_range}</div>
         <div style={S.cardFoot}>
-          <span style={S.price}>{money(p.price)}</span>
-          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-            {hasUpi && <button className="iconbtn" title="Pay this toy via UPI QR" style={{ color: "#8a5fb0" }} onClick={() => setShowQR(true)}><QrCode size={16} /></button>}
-            {qty === 0 ? (
-              <button className="addbtn" onClick={onInc}><Plus size={15} /> Add</button>
-            ) : (
-              <div style={S.stepper}>
-                <button className="qtybtn" onClick={onDec}><Minus size={14} /></button>
-                <span style={S.qty}>{qty}</span>
-                <button className="qtybtn" onClick={onInc}><Plus size={14} /></button>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-      {showQR && (
-        <Modal onClose={() => setShowQR(false)}>
-          <h3 style={S.modalTitle}>Pay for {p.name}</h3>
-          <div style={{ textAlign: "center" }}>
-            <div style={S.qrWrap}><UpiQR value={upiString} size={210} /></div>
-            <div style={S.qrHint}>Scan to pay {money(p.price)} to <b>{settings.upi_id}</b></div>
-            <a className="cta full" href={upiString} style={{ textDecoration: "none" }}>Open in UPI app</a>
-          </div>
-        </Modal>
-      )}
-    </div>
-  );
-}
-
-/* ===================== ADMIN ===================== */
-function AdminPanel({ flash, onChanged, products, settings }) {
-  const [sub, setSub] = useState("products");
-  return (
-    <>
-      <div style={S.adminTabs}>
-        <button className={`subtab ${sub === "products" ? "subtab-on" : ""}`} onClick={() => setSub("products")}><Package size={15} /> Products</button>
-        <button className={`subtab ${sub === "orders" ? "subtab-on" : ""}`} onClick={() => setSub("orders")}><ClipboardList size={15} /> Orders</button>
-        <button className={`subtab ${sub === "settings" ? "subtab-on" : ""}`} onClick={() => setSub("settings")}><Settings size={15} /> Payment</button>
-      </div>
-      {sub === "products" && <AdminProducts flash={flash} onChanged={onChanged} products={products} />}
-      {sub === "orders" && <AdminOrders flash={flash} />}
-      {sub === "settings" && <AdminSettings flash={flash} onChanged={onChanged} settings={settings} />}
-    </>
-  );
-}
-
-function AdminSettings({ flash, onChanged, settings }) {
-  const [upiId, setUpiId] = useState(settings?.upi_id || "");
-  const [payeeName, setPayeeName] = useState(settings?.payee_name || "");
-  const [busy, setBusy] = useState(false);
-  async function save() {
-    if (!upiId.trim()) { flash("7981166388-2@ybl"); return; }
-    setBusy(true);
-    const { error } = await supabase.from("store_settings").upsert({ id: 1, upi_id: upiId.trim(), payee_name: payeeName.trim(), updated_at: new Date().toISOString() });
-    setBusy(false);
-    if (error) { flash("Save failed: " + error.message); return; }
-    flash("Payment settings saved"); onChanged();
-  }
-  return (
-    <>
-      <h2 style={S.sectionTitle}>Payment settings</h2>
-      <p style={S.sectionSub}>Your UPI ID generates the QR codes for toys and checkout.</p>
-      <div style={{ maxWidth: 460, display: "flex", flexDirection: "column", gap: 12 }}>
-        <div><div style={S.adminLabel}>Your UPI ID (VPA)</div><input style={{ ...S.input, width: "100%" }} placeholder="yourname@okbank" value={upiId} onChange={(e) => setUpiId(e.target.value)} /></div>
-        <div><div style={S.adminLabel}>Payee name</div><input style={{ ...S.input, width: "100%" }} placeholder="Vaayanam" value={payeeName} onChange={(e) => setPayeeName(e.target.value)} /></div>
-        <button className="cta" disabled={busy} onClick={save}>{busy ? <Loader2 className="spin" size={16} /> : <Check size={16} />} Save</button>
-      </div>
-      <div style={S.securityNote}><b>How payments work:</b> customers pay your UPI directly. Orders stay <b>pending</b> until you confirm in Orders after seeing the money in your UPI app. Approving credits the amount (plus ₹50 reward if over ₹2000) to the customer's wallet.</div>
-    </>
-  );
-}
-
-function AdminOrders({ flash }) {
-  const [orders, setOrders] = useState([]); const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState("pending"); const [workingId, setWorkingId] = useState(null);
-  useEffect(() => { load(); }, []);
-  async function load() { setLoading(true); const { data, error } = await supabase.from("orders").select("*").order("created_at", { ascending: false }); if (error) flash("Load failed: " + error.message); setOrders(data || []); setLoading(false); }
-  async function approve(o) {
-    setWorkingId(o.id);
-    const { error } = await supabase.rpc("approve_order", { p_order_id: o.id });
-    setWorkingId(null);
-    if (error) { flash("Approve failed: " + error.message); return; }
-    flash(`Approved · ${money(o.total)}${o.total > 2000 ? " +₹50 reward" : ""} credited ✓`); load();
-  }
-  async function cancel(id) { const { error } = await supabase.from("orders").update({ status: "cancelled" }).eq("id", id); if (error) flash("Failed: " + error.message); else { flash("Cancelled"); load(); } }
-  const shown = orders.filter((o) => filter === "all" ? true : o.status === filter);
-  if (loading) return <div style={S.center}><Loader2 className="spin" size={28} color="#C1432E" /></div>;
-  return (
-    <>
-      <h2 style={S.sectionTitle}>Orders</h2>
-      <p style={S.sectionSub}>Confirm a payment only after you see it in your UPI app. Approving credits the buyer's wallet.</p>
-      <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>{["pending", "paid", "all"].map((f) => (<button key={f} className={`subtab ${filter === f ? "subtab-on" : ""}`} style={{ textTransform: "capitalize" }} onClick={() => setFilter(f)}>{f}</button>))}</div>
-      {shown.length === 0 ? (<div style={S.empty}><ClipboardList size={30} color="#d6c9dd" /><p>No {filter === "all" ? "" : filter} orders.</p></div>) : (
-        <div style={S.adminList}>{shown.map((o) => (
-          <div key={o.id} style={S.orderRow}>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontWeight: 800 }}>Order #{o.id} · {money(o.total)}<span style={{ ...S.statusPill, ...(o.status === "paid" ? S.pillPaid : o.status === "cancelled" ? S.pillCancel : S.pillPending) }}>{o.status}</span></div>
-              <div style={{ fontSize: 13, color: "#9a8da5", margin: "3px 0" }}>{prettyDateTime(o.created_at)}</div>
-              <div style={{ fontSize: 13, color: "#5b5066" }}>{(o.items || []).map((it, n) => <span key={n}>{it.name} ×{it.qty}{n < o.items.length - 1 ? ", " : ""}</span>)}</div>
-            </div>
-            {o.status === "pending" && (
-              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                <button className="cta" style={{ padding: "8px 14px", fontSize: 13 }} disabled={workingId === o.id} onClick={() => approve(o)}>{workingId === o.id ? <Loader2 className="spin" size={14} /> : <Check size={14} />} Approve & credit</button>
-                <button className="ghostbtn" onClick={() => cancel(o.id)}>Cancel</button>
-              </div>
-            )}
-          </div>
-        ))}</div>
-      )}
-    </>
-  );
-}
-
-function AdminProducts({ flash, onChanged, products }) {
-  const [name, setName] = useState(""); const [description, setDescription] = useState("");
-  const [price, setPrice] = useState(""); const [category, setCategory] = useState("");
-  const [emoji, setEmoji] = useState("🎁"); const [rating, setRating] = useState("4.5");
-  const [ageRange, setAgeRange] = useState(""); const [tags, setTags] = useState([]);
-  const [file, setFile] = useState(null); const [busy, setBusy] = useState(false);
-  const ALL_TAGS = ["fun", "celebration", "baby", "soft", "milestone", "learning", "festive"];
-  function toggleTag(t) { setTags((c) => c.includes(t) ? c.filter((x) => x !== t) : [...c, t]); }
-  async function save() {
-    if (!name.trim() || !price) { flash("Name and price are required"); return; }
-    setBusy(true); let image_url = null;
-    try {
-      if (file) {
-        const ext = file.name.split(".").pop();
-        const path = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
-        const { error: upErr } = await supabase.storage.from("product-images").upload(path, file, { upsert: false });
-        if (upErr) throw upErr;
-        image_url = supabase.storage.from("product-images").getPublicUrl(path).data.publicUrl;
-      }
-      const { error } = await supabase.from("products").insert({
-        name: name.trim(), description: description.trim() || null, price: Number(price),
-        category: category.trim() || "Toys", emoji, rating: Number(rating) || 4.5, age_range: ageRange.trim() || "All", tags, image_url,
-      });
-      if (error) throw error;
-      flash("Toy added! 🎉");
-      setName(""); setDescription(""); setPrice(""); setCategory(""); setEmoji("🎁"); setRating("4.5"); setAgeRange(""); setTags([]); setFile(null);
-      onChanged();
-    } catch (e) { flash("Add failed: " + e.message); } finally { setBusy(false); }
-  }
-  async function deleteProduct(id) { const { error } = await supabase.from("products").delete().eq("id", id); if (error) flash("Delete failed: " + error.message); else { flash("Removed"); onChanged(); } }
-  return (
-    <>
-      <h2 style={S.sectionTitle}>Add a toy</h2>
-      <p style={S.sectionSub}>New products appear in the shop right away, marked NEW for {NEW_DAYS} days.</p>
-      <div style={S.adminForm}>
-        <input style={S.input} placeholder="Toy name" value={name} onChange={(e) => setName(e.target.value)} />
-        <input style={S.input} type="number" step="0.01" placeholder="Price ₹ e.g. 299" value={price} onChange={(e) => setPrice(e.target.value)} />
-        <select style={S.input} value={category} onChange={(e) => setCategory(e.target.value)}>
-          <option value="">Select category…</option>
-          {["STEM & Learning","Plush & Soft Toys","Classic & Wooden","Creative & Arts","Pretend Play","Baby & Infant","Games & Puzzles","Festive & Decor","Keepsakes & Gifts","Outdoor & Active"].map((c) => (
-            <option key={c} value={c}>{c}</option>
-          ))}
-        </select>
-        <input style={S.input} placeholder="Age range e.g. 3-7" value={ageRange} onChange={(e) => setAgeRange(e.target.value)} />
-        <input style={S.input} placeholder="Fallback emoji" value={emoji} onChange={(e) => setEmoji(e.target.value)} />
-        <input style={S.input} type="number" step="0.1" min="0" max="5" placeholder="Rating 0-5" value={rating} onChange={(e) => setRating(e.target.value)} />
-      </div>
-      <div style={{ margin: "0 0 12px" }}><textarea style={{ ...S.input, width: "100%", minHeight: 90, resize: "vertical" }} placeholder="Description" value={description} onChange={(e) => setDescription(e.target.value)} /></div>
-      <div style={{ margin: "4px 0 16px" }}><div style={S.adminLabel}>Occasion tags</div><div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>{ALL_TAGS.map((t) => (<button key={t} onClick={() => toggleTag(t)} className={`tagchip ${tags.includes(t) ? "tagchip-on" : ""}`}>{t}</button>))}</div></div>
-      <div style={{ margin: "4px 0 18px" }}><div style={S.adminLabel}>Photo (optional)</div><input type="file" accept="image/*" onChange={(e) => setFile(e.target.files?.[0] || null)} /></div>
-      <button className="cta" disabled={busy} onClick={save}>{busy ? <Loader2 className="spin" size={16} /> : <Plus size={16} />} Add toy</button>
-      <h3 style={S.subhead}>Current toys ({products.length})</h3>
-      <div style={S.adminList}>
-        {products.length === 0 && <div style={S.empty}><Package size={28} color="#d6c9dd" /><p>No toys yet. Add your first above.</p></div>}
-        {products.map((p) => (
-          <div key={p.id} style={S.adminRow}>
-            <div className="cartArt" style={{ fontSize: 26, width: 46, height: 46 }}>{p.image_url ? <img src={p.image_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: 12 }} /> : p.emoji}</div>
-            <div style={{ flex: 1 }}><div style={{ fontWeight: 800 }}>{p.name} {isNew(p.created_at) && <span className="newbadge-inline">NEW</span>}</div><div style={{ fontSize: 13, color: "#9a8da5" }}>{money(p.price)} · {p.category}</div></div>
-            <button className="iconbtn" onClick={() => deleteProduct(p.id)}><Trash2 size={16} /></button>
-          </div>
-        ))}
-      </div>
-    </>
-  );
-}
-
-function RemindersPanel({ userId, reminders, setReminders, flash, onShop }) {
-  const [title, setTitle] = useState(""); const [date, setDate] = useState(""); const [occ, setOcc] = useState("birthday");
-  async function add() {
-    if (!title.trim() || !date) { flash("Add a name and a date"); return; }
-    const { data, error } = await supabase.from("reminders").insert({ user_id: userId, title: title.trim(), remind_date: date, occasion: occ }).select().single();
-    if (error) { flash(error.message); return; }
-    setReminders((r) => [...r, data].sort((a, b) => a.remind_date.localeCompare(b.remind_date)));
-    setTitle(""); setDate(""); flash("Reminder saved 🔔");
-  }
-  async function remove(id) { setReminders((r) => r.filter((x) => x.id !== id)); await supabase.from("reminders").delete().eq("id", id); }
-  return (
-    <>
-      <h2 style={S.sectionTitle}>Gift reminders</h2>
-      <p style={S.sectionSub}>Never miss a moment — we'll line up gift ideas when it's time.</p>
-      <div style={S.reminderForm}>
-        <input style={S.input} placeholder="Whose moment? e.g. Amma's birthday" value={title} onChange={(e) => setTitle(e.target.value)} />
-        <input style={S.input} type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-        <select style={S.input} value={occ} onChange={(e) => setOcc(e.target.value)}>{OCCASIONS.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}</select>
-        <button className="cta" onClick={add}><Plus size={16} /> Add reminder</button>
-      </div>
-      <div style={S.reminderList}>
-        {reminders.length === 0 && <div style={S.empty}><Bell size={28} color="#d6c9dd" /><p>No reminders yet. Add your first above.</p></div>}
-        {reminders.map((r) => {
-          const o = OCCASIONS.find((x) => x.id === r.occasion) || OCCASIONS[0]; const days = daysUntil(r.remind_date);
-          return (
-            <div key={r.id} className="reminderCard">
-              <span style={{ ...S.occIcon, background: o.hue + "22", color: o.hue }}><o.icon size={20} /></span>
-              <div style={{ flex: 1 }}><div style={S.reminderTitle}>{r.title}</div><div style={S.reminderMeta}>{prettyDate(r.remind_date)} · {days < 0 ? "passed" : days === 0 ? "today!" : `in ${days} day${days > 1 ? "s" : ""}`}</div></div>
-              <button className="ghostbtn" onClick={() => onShop(r.occasion)}>Find gifts</button>
-              <button className="iconbtn" onClick={() => remove(r.id)} aria-label="delete"><Trash2 size={16} /></button>
-            </div>
-          );
-        })}
-      </div>
-    </>
-  );
-}
-
-function WalletPanel({ wallet, log, onTopUp }) {
-  return (
-    <>
-      <h2 style={S.sectionTitle}>Your wallet</h2>
-      <p style={S.sectionSub}>Balance updates live. Approved orders are credited here (with ₹50 reward over ₹2000); spend it for instant checkout.</p>
-      <div style={S.walletCard}>
-        <div style={S.walletGlow} />
-        <div style={S.walletLabel}><CreditCard size={16} /> Balance</div>
-        <div style={S.walletBalance}>{money(wallet)}</div>
-        <div style={S.topUpRow}>{[100, 250, 500].map((a) => <button key={a} className="topup" onClick={() => onTopUp(a)}>+ {money(a)}</button>)}</div>
-      </div>
-      <h3 style={S.subhead}>Activity</h3>
-      <div style={S.logList}>{log.map((e) => (
-        <div key={e.id} style={S.logRow}>
-          <div><div style={S.logType}>{e.type}</div><div style={S.logWhen}>{prettyDateTime(e.created_at)}</div></div>
-          <div style={{ ...S.logAmt, color: e.amount < 0 ? "#C1432E" : "#1faa6b" }}>{e.amount < 0 ? "-" : "+"}{money(Math.abs(e.amount))}</div>
-        </div>
-      ))}</div>
-    </>
-  );
-}
-
-function CartPanel({ items, subtotal, wallet, onSetQty, onCheckout, onWalletPay, onShop }) {
-  if (items.length === 0) return <div style={S.empty}><ShoppingCart size={32} color="#d6c9dd" /><p>Your cart is empty.</p><button className="cta" onClick={onShop}>Start shopping</button></div>;
-  const canWallet = wallet >= subtotal && subtotal > 0;
-  return (
-    <>
-      <h2 style={S.sectionTitle}>Your cart</h2>
-      <div style={S.cartList}>{items.map((i) => (
-        <div key={i.id} className="cartRow">
-          <div className="cartArt">{i.image_url ? <img src={i.image_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: 14 }} /> : i.emoji}</div>
-          <div style={{ flex: 1 }}><div style={S.cardName}>{i.name}</div><div style={S.cardMeta}>{money(i.price)} each</div></div>
-          <div style={S.stepper}><button className="qtybtn" onClick={() => onSetQty(i.id, i.qty - 1)}><Minus size={14} /></button><span style={S.qty}>{i.qty}</span><button className="qtybtn" onClick={() => onSetQty(i.id, i.qty + 1)}><Plus size={14} /></button></div>
-          <div style={S.lineTotal}>{money(i.price * i.qty)}</div>
-          <button className="iconbtn" onClick={() => onSetQty(i.id, 0)}><X size={16} /></button>
-        </div>
-      ))}</div>
-      <div style={S.summary}>
-        <div style={S.sumLine}><span>Subtotal</span><span>{money(subtotal)}</span></div>
-        <div style={S.sumLine}><span>Shipping</span><span style={{ color: "#1faa6b" }}>Free</span></div>
-        {subtotal > 2000 && <div style={{ ...S.sumLine, color: "#1faa6b", fontWeight: 800 }}><span>🎁 Reward</span><span>+₹50 to wallet on approval</span></div>}
-        <div style={{ ...S.sumLine, ...S.sumTotal }}><span>Total</span><span>{money(subtotal)}</span></div>
-        <div style={S.walletNote}><Wallet size={14} /> Wallet: {money(wallet)}</div>
-        {canWallet && <button className="cta full" style={{ marginBottom: 10 }} onClick={onWalletPay}><Zap size={16} /> Pay from wallet</button>}
-        <button className="ghostbtn" style={{ width: "100%", padding: 13 }} onClick={onCheckout}>Checkout with UPI <ArrowRight size={14} /></button>
-      </div>
-    </>
-  );
-}
-
-function Modal({ children, onClose }) {
-  return <div className="overlay" onClick={onClose}><div className="modal" onClick={(e) => e.stopPropagation()}><button className="iconbtn modalClose" onClick={onClose}><X size={18} /></button>{children}</div></div>;
-}
-
-function daysUntil(s) { const t = new Date(); t.setHours(0,0,0,0); const d = new Date(s); d.setHours(0,0,0,0); return Math.round((d - t) / 86400000); }
-function prettyDate(s) { return new Date(s).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }); }
-function prettyDateTime(s) { return new Date(s).toLocaleDateString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }); }
-
-const S = {
-  app: { fontFamily: "'Nunito', system-ui, sans-serif", background: "#FDF7F0", minHeight: "100vh", color: "#2a1a3e" },
-  center: { minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#FDF7F0" },
-  authWrap: { minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, background: "linear-gradient(120deg,#FFE9D6,#F3E0F0)" },
-  authCard: { background: "#fff", borderRadius: 24, padding: "36px 32px", width: "100%", maxWidth: 360, boxShadow: "0 20px 50px rgba(60,30,50,.14)", display: "flex", flexDirection: "column", gap: 12 },
-  authBrand: { fontWeight: 900, fontSize: 30, textAlign: "center", color: "#C1432E", letterSpacing: "0.01em" },
-  authMotto: { fontSize: 12.5, color: "#C1432E", textAlign: "center", fontWeight: 700, marginTop: -6, fontStyle: "italic" },
-  authTag: { fontSize: 14, color: "#9a8da5", textAlign: "center", marginBottom: 4, fontWeight: 600 },
-  authMsg: { fontSize: 13, color: "#5b5066", textAlign: "center", background: "#faf3f8", padding: "10px 12px", borderRadius: 10, fontWeight: 600 },
-  authSwitch: { fontSize: 13.5, color: "#9a8da5", textAlign: "center", fontWeight: 600 },
-  header: { display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 28px", background: "#fff", borderBottom: "1px solid #f0e3ec", position: "sticky", top: 0, zIndex: 50, flexWrap: "wrap", gap: 12 },
-  brand: { display: "flex", alignItems: "center", gap: 12 }, logoMark: { fontSize: 30 },
-  brandName: { fontWeight: 900, fontSize: 23, color: "#C1432E", letterSpacing: "0.01em" }, brandTag: { fontSize: 10.5, color: "#C1432E", fontWeight: 700, fontStyle: "italic" },
-  nav: { display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" },
-  main: { maxWidth: 1100, margin: "0 auto", padding: "28px 20px 60px" },
-  hero: { display: "flex", gap: 24, alignItems: "center", background: "linear-gradient(120deg,#FFE9D6,#F3E0F0)", borderRadius: 28, padding: "40px 36px", marginBottom: 28, overflow: "hidden", flexWrap: "wrap" },
-  heroInner: { flex: "1 1 320px" },
-  heroEyebrow: { display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 800, color: "#C1432E", background: "#fff", padding: "5px 12px", borderRadius: 999, marginBottom: 14 },
-  heroTitle: { fontSize: 38, fontWeight: 900, lineHeight: 1.08, margin: "0 0 12px", color: "#3a2150" },
-  heroSub: { fontSize: 16, color: "#5b5066", maxWidth: 440, margin: "0 0 22px", lineHeight: 1.5 },
-  heroArt: { flex: "1 1 220px", display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 10, fontSize: 44, justifyItems: "center" },
-  searchRow: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 14, marginBottom: 20, flexWrap: "wrap" },
-  searchWrap: { display: "flex", alignItems: "center", gap: 10, background: "#fff", border: "1px solid #f0e3ec", borderRadius: 14, padding: "11px 16px", flex: 1, minWidth: 240 },
-  search: { border: "none", outline: "none", fontSize: 15, flex: 1, background: "transparent", fontFamily: "inherit" },
-  resultCount: { fontSize: 13, color: "#9a8da5", fontWeight: 700 },
-  grid: { display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(220px,1fr))", gap: 18 },
-  cardBody: { padding: "14px 16px 16px" },
-  cardTop: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 },
-  cat: { fontSize: 11, fontWeight: 800, color: "#8a5fb0", background: "#f3eafa", padding: "3px 9px", borderRadius: 999, textTransform: "uppercase", letterSpacing: "0.04em" },
-  rating: { display: "inline-flex", alignItems: "center", gap: 3, fontSize: 12, fontWeight: 700, color: "#7a7080" },
-  cardName: { fontWeight: 800, fontSize: 16, marginBottom: 3 },
-  cardDesc: { fontSize: 13, color: "#5b5066", marginBottom: 8, lineHeight: 1.45, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" },
-  cardMeta: { fontSize: 12.5, color: "#9a8da5", marginBottom: 12, fontWeight: 600 },
-  cardFoot: { display: "flex", alignItems: "center", justifyContent: "space-between" },
-  price: { fontWeight: 900, fontSize: 18, color: "#3a2150" },
-  stepper: { display: "flex", alignItems: "center", gap: 6, background: "#f6eef2", borderRadius: 10, padding: 4 },
-  sectionTitle: { fontSize: 28, fontWeight: 900, margin: "0 0 4px", color: "#3a2150" },
-  sectionSub: { fontSize: 15, color: "#7a7080", margin: "0 0 22px" },
-  subhead: { fontSize: 18, fontWeight: 800, margin: "28px 0 14px" },
-  occRow: { display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 28 },
-  occIcon: { display: "inline-flex", alignItems: "center", justifyContent: "center", width: 38, height: 38, borderRadius: 12 },
-  suggestHead: { display: "flex", alignItems: "center", gap: 8, fontWeight: 800, fontSize: 16, margin: "8px 0 18px", color: "#3a2150" },
-  reminderForm: { display: "grid", gridTemplateColumns: "2fr 1fr 1fr auto", gap: 10, marginBottom: 24 },
-  input: { padding: "11px 14px", borderRadius: 12, border: "1px solid #e9dce6", fontSize: 14, fontFamily: "inherit", outline: "none", background: "#fff" },
-  reminderList: { display: "flex", flexDirection: "column", gap: 12 },
-  reminderTitle: { fontWeight: 800, fontSize: 16 }, reminderMeta: { fontSize: 13, color: "#9a8da5", fontWeight: 600 },
-  adminTabs: { display: "flex", gap: 8, marginBottom: 24, flexWrap: "wrap" },
-  adminForm: { display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))", gap: 10, marginBottom: 8 },
-  adminLabel: { fontSize: 13, fontWeight: 800, color: "#5b5066", marginBottom: 8 },
-  adminList: { display: "flex", flexDirection: "column", gap: 10 },
-  adminRow: { display: "flex", alignItems: "center", gap: 14, background: "#fff", border: "1px solid #f0e3ec", borderRadius: 14, padding: 12 },
-  orderRow: { display: "flex", alignItems: "flex-start", gap: 14, background: "#fff", border: "1px solid #f0e3ec", borderRadius: 14, padding: 16 },
-  statusPill: { fontSize: 11, fontWeight: 800, padding: "3px 9px", borderRadius: 999, marginLeft: 10, textTransform: "uppercase", letterSpacing: "0.03em" },
-  pillPending: { background: "#fff0e0", color: "#E8A33D" }, pillPaid: { background: "#e7f7ef", color: "#1faa6b" }, pillCancel: { background: "#fdeceb", color: "#C1432E" },
-  securityNote: { marginTop: 24, background: "#fff6ee", border: "1px solid #ffe0c4", borderRadius: 14, padding: 16, fontSize: 13.5, color: "#8a5a2e", lineHeight: 1.55, maxWidth: 560 },
-  qrWrap: { display: "inline-flex", padding: 14, background: "#fff", border: "1px solid #f0e3ec", borderRadius: 18, marginBottom: 12 },
-  qrHint: { fontSize: 14, color: "#5b5066", marginBottom: 14, fontWeight: 600 },
-  qrNote: { fontSize: 12.5, color: "#9a8da5", margin: "12px 0", lineHeight: 1.5 },
-  walletCard: { position: "relative", background: "linear-gradient(135deg,#C1432E,#8a5fb0)", borderRadius: 24, padding: "30px 30px 26px", color: "#fff", overflow: "hidden", maxWidth: 420 },
-  walletGlow: { position: "absolute", width: 200, height: 200, background: "rgba(255,255,255,0.18)", borderRadius: "50%", top: -70, right: -40 },
-  walletLabel: { display: "inline-flex", alignItems: "center", gap: 7, fontSize: 13, fontWeight: 700, opacity: 0.92 },
-  walletBalance: { fontSize: 44, fontWeight: 900, margin: "6px 0 18px", letterSpacing: "-0.02em" },
-  topUpRow: { display: "flex", gap: 10 },
-  logList: { display: "flex", flexDirection: "column", gap: 2, maxWidth: 520 },
-  logRow: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "13px 4px", borderBottom: "1px solid #f0e3ec" },
-  logType: { fontWeight: 700, fontSize: 14.5 }, logWhen: { fontSize: 12, color: "#9a8da5" }, logAmt: { fontWeight: 800, fontSize: 15 },
-  cartList: { display: "flex", flexDirection: "column", gap: 12, marginBottom: 24 },
-  qty: { fontWeight: 800, minWidth: 22, textAlign: "center" },
-  lineTotal: { fontWeight: 900, minWidth: 70, textAlign: "right", fontSize: 16 },
-  summary: { background: "#fff", border: "1px solid #f0e3ec", borderRadius: 20, padding: 24, maxWidth: 400, marginLeft: "auto" },
-  sumLine: { display: "flex", justifyContent: "space-between", fontSize: 15, padding: "7px 0", color: "#5b5066", fontWeight: 600 },
-  sumTotal: { borderTop: "1px solid #f0e3ec", marginTop: 8, paddingTop: 14, fontSize: 19, fontWeight: 900, color: "#3a2150" },
-  walletNote: { display: "flex", alignItems: "center", gap: 7, fontSize: 13, color: "#7a7080", fontWeight: 700, margin: "12px 0 16px" },
-  empty: { textAlign: "center", padding: "70px 20px", color: "#9a8da5", display: "flex", flexDirection: "column", alignItems: "center", gap: 14 },
-  modalTitle: { fontSize: 22, fontWeight: 900, margin: "0 0 18px" },
-  checkoutRows: { display: "flex", flexDirection: "column", gap: 8, marginBottom: 18 },
-  checkoutRow: { display: "flex", justifyContent: "space-between", fontSize: 14.5, fontWeight: 600, color: "#5b5066" },
-  payBox: { background: "#faf3f0", borderRadius: 14, padding: 16, marginBottom: 18 },
-  payLine: { display: "flex", justifyContent: "space-between", fontSize: 14, padding: "5px 0", color: "#5b5066", fontWeight: 600 },
-  payTotal: { fontWeight: 900, fontSize: 17, color: "#3a2150" },
-  warn: { background: "#fdeceb", color: "#C1432E", padding: "12px 16px", borderRadius: 12, fontSize: 14, fontWeight: 700, textAlign: "center", marginBottom: 12 },
-  footer: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "20px 28px", borderTop: "1px solid #f0e3ec", fontSize: 13, fontWeight: 700, color: "#5b5066", flexWrap: "wrap", gap: 8 },
-  aiHead: { display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 16px", borderBottom: "1px solid #f0e3ec" },
-  aiBody: { flex: 1, overflowY: "auto", padding: 16, display: "flex", flexDirection: "column", gap: 10 },
-  bubble: { padding: "10px 14px", borderRadius: 14, fontSize: 14, lineHeight: 1.45, maxWidth: "85%" },
-  bubbleUser: { background: "#C1432E", color: "#fff", alignSelf: "flex-end", borderBottomRightRadius: 4 },
-  bubbleBot: { background: "#f3eef5", color: "#2a1a3e", alignSelf: "flex-start", borderBottomLeftRadius: 4 },
-  aiInputRow: { display: "flex", gap: 8, padding: 14, borderTop: "1px solid #f0e3ec" },
-};
-
-const CSS = `
-@import url('https://fonts.googleapis.com/css2?family=Nunito:wght@600;700;800;900&display=swap');
-* { box-sizing: border-box; } body { margin: 0; }
-.navbtn { display:inline-flex; align-items:center; gap:6px; border:none; background:transparent; font-family:inherit; font-weight:800; font-size:14px; color:#7a7080; padding:9px 14px; border-radius:11px; cursor:pointer; transition:.15s; }
-.navbtn:hover { background:#f6eef2; color:#3a2150; } .navbtn-on { background:#FCE6DF; color:#C1432E; }
-.walletchip { display:inline-flex; align-items:center; gap:6px; border:2px solid #f0e0d8; background:#fdf2ec; color:#C1432E; font-family:inherit; font-weight:900; font-size:13.5px; padding:8px 13px; border-radius:11px; cursor:pointer; transition:.15s; }
-.walletchip:hover { border-color:#C1432E; }
-.subtab { display:inline-flex; align-items:center; gap:6px; border:2px solid #f0e3ec; background:#fff; font-family:inherit; font-weight:800; font-size:13.5px; color:#7a7080; padding:9px 16px; border-radius:12px; cursor:pointer; transition:.15s; }
-.subtab:hover { border-color:#C1432E; color:#C1432E; } .subtab-on { background:#FCE6DF; border-color:#C1432E; color:#C1432E; }
-.cartbtn { position:relative; border:none; background:#3a2150; color:#fff; width:42px; height:42px; border-radius:12px; display:inline-flex; align-items:center; justify-content:center; cursor:pointer; transition:.15s; }
-.cartbtn:hover { transform:translateY(-2px); }
-.badge { position:absolute; top:-6px; right:-6px; background:#C1432E; color:#fff; font-size:11px; font-weight:900; min-width:19px; height:19px; border-radius:999px; display:flex; align-items:center; justify-content:center; padding:0 4px; }
-.cta { display:inline-flex; align-items:center; gap:8px; background:#C1432E; color:#fff; border:none; font-family:inherit; font-weight:900; font-size:15px; padding:13px 22px; border-radius:14px; cursor:pointer; transition:.18s; box-shadow:0 6px 18px rgba(193,67,46,.3); }
-.cta:hover { transform:translateY(-2px); box-shadow:0 10px 24px rgba(193,67,46,.4); } .cta:disabled { opacity:.6; cursor:default; transform:none; } .cta.full { width:100%; justify-content:center; }
-.linkbtn { background:none; border:none; color:#C1432E; font-family:inherit; font-weight:800; font-size:13.5px; cursor:pointer; padding:0; }
-.card { position:relative; background:#fff; border:1px solid #f0e3ec; border-radius:20px; overflow:hidden; transition:.2s; }
-.card:hover { transform:translateY(-5px); box-shadow:0 16px 34px rgba(60,30,50,.1); border-color:#f0d2c8; }
-.cardArt { font-size:64px; text-align:center; padding:26px 0 18px; background:linear-gradient(135deg,#FFF3EC,#F7EEF8); display:flex; align-items:center; justify-content:center; min-height:120px; }
-.cardImg { width:100%; height:140px; object-fit:cover; display:block; margin:-26px 0 -18px; }
-.cartArt { font-size:40px; width:64px; height:64px; display:flex; align-items:center; justify-content:center; background:#f7eef8; border-radius:14px; overflow:hidden; }
-.newbadge { position:absolute; top:12px; left:12px; z-index:2; background:#1faa6b; color:#fff; font-size:10.5px; font-weight:900; padding:4px 9px; border-radius:999px; letter-spacing:.05em; box-shadow:0 3px 8px rgba(31,170,107,.4); }
-.newbadge-inline { background:#1faa6b; color:#fff; font-size:10px; font-weight:900; padding:2px 7px; border-radius:999px; margin-left:6px; letter-spacing:.04em; }
-.favbtn { position:absolute; top:12px; right:12px; z-index:2; border:none; background:rgba(255,255,255,.9); width:32px; height:32px; border-radius:50%; display:flex; align-items:center; justify-content:center; cursor:pointer; color:#d6c9dd; transition:.15s; }
-.favbtn:hover { transform:scale(1.12); } .favon { color:#C1432E; }
-.addbtn { display:inline-flex; align-items:center; gap:4px; background:#3a2150; color:#fff; border:none; font-family:inherit; font-weight:800; font-size:13px; padding:8px 14px; border-radius:10px; cursor:pointer; transition:.15s; }
-.addbtn:hover { background:#C1432E; }
-.occchip { display:inline-flex; align-items:center; gap:10px; background:#fff; border:2px solid #f0e3ec; font-family:inherit; font-weight:800; font-size:15px; color:#3a2150; padding:10px 18px 10px 10px; border-radius:16px; cursor:pointer; transition:.15s; }
-.occchip:hover { transform:translateY(-2px); }
-.festchip { display:inline-flex; align-items:center; gap:7px; background:#fff; border:2px solid #f0e3ec; font-family:inherit; font-weight:800; font-size:13.5px; color:#5b5066; padding:8px 14px; border-radius:12px; cursor:pointer; transition:.15s; }
-.festchip:hover { border-color:#C1432E; } .festchip-on { background:#FCE6DF; border-color:#C1432E; color:#C1432E; }
-.promptchip { text-align:left; background:#faf6f9; border:1px solid #f0e3ec; font-family:inherit; font-weight:600; font-size:13.5px; color:#5b5066; padding:11px 14px; border-radius:12px; cursor:pointer; transition:.15s; line-height:1.4; }
-.promptchip:hover { background:#FCE6DF; border-color:#C1432E; color:#C1432E; }
-.topup { background:rgba(255,255,255,.22); color:#fff; border:1.5px solid rgba(255,255,255,.5); font-family:inherit; font-weight:800; font-size:14px; padding:9px 16px; border-radius:11px; cursor:pointer; transition:.15s; }
-.topup:hover { background:#fff; color:#C1432E; }
-.tagchip { background:#fff; border:2px solid #f0e3ec; font-family:inherit; font-weight:800; font-size:13px; color:#7a7080; padding:7px 14px; border-radius:999px; cursor:pointer; transition:.15s; text-transform:capitalize; }
-.tagchip:hover { border-color:#C1432E; color:#C1432E; } .tagchip-on { background:#FCE6DF; border-color:#C1432E; color:#C1432E; }
-.reminderCard { display:flex; align-items:center; gap:14px; background:#fff; border:1px solid #f0e3ec; border-radius:16px; padding:14px 16px; }
-.ghostbtn { display:inline-flex; align-items:center; justify-content:center; gap:6px; background:#f6eef2; border:none; font-family:inherit; font-weight:800; font-size:13px; color:#3a2150; padding:8px 14px; border-radius:10px; cursor:pointer; transition:.15s; }
-.ghostbtn:hover { background:#FCE6DF; color:#C1432E; }
-.iconbtn { background:transparent; border:none; color:#c9bcd0; cursor:pointer; padding:7px; border-radius:9px; display:inline-flex; transition:.15s; }
-.iconbtn:hover { background:#fdeceb; color:#C1432E; }
-.cartRow { display:flex; align-items:center; gap:14px; background:#fff; border:1px solid #f0e3ec; border-radius:16px; padding:14px; }
-.qtybtn { background:#fff; border:none; width:28px; height:28px; border-radius:8px; display:flex; align-items:center; justify-content:center; cursor:pointer; color:#3a2150; }
-.qtybtn:hover { background:#FCE6DF; color:#C1432E; }
-.overlay { position:fixed; inset:0; background:rgba(42,26,62,.45); backdrop-filter:blur(3px); display:flex; align-items:center; justify-content:center; z-index:100; padding:20px; }
-.modal { position:relative; background:#fff; border-radius:24px; padding:30px; max-width:440px; width:100%; max-height:90vh; overflow:auto; box-shadow:0 30px 70px rgba(0,0,0,.25); }
-.modalClose { position:absolute; top:16px; right:16px; }
-.toast { position:fixed; bottom:26px; left:50%; transform:translateX(-50%); background:#3a2150; color:#fff; font-weight:800; font-size:14px; padding:13px 22px; border-radius:14px; z-index:200; box-shadow:0 12px 30px rgba(0,0,0,.25); animation:pop .25s ease; max-width:90vw; text-align:center; }
-@keyframes pop { from { transform:translate(-50%,12px); opacity:0; } to { transform:translate(-50%,0); opacity:1; } }
-.aifab { position:fixed; bottom:24px; right:24px; z-index:90; width:56px; height:56px; border-radius:50%; border:none; background:#C1432E; color:#fff; display:flex; align-items:center; justify-content:center; cursor:pointer; box-shadow:0 8px 24px rgba(193,67,46,.45); transition:.18s; }
-.aifab:hover { transform:scale(1.08); }
-.aiPanel { position:fixed; bottom:24px; right:24px; z-index:95; width:370px; max-width:calc(100vw - 32px); height:540px; max-height:calc(100vh - 48px); background:#fff; border-radius:22px; box-shadow:0 24px 60px rgba(0,0,0,.28); display:flex; flex-direction:column; overflow:hidden; }
-.float { animation:floaty 3s ease-in-out infinite; } @keyframes floaty { 0%,100% { transform:translateY(0); } 50% { transform:translateY(-10px); } }
-.spin { animation:spin 1s linear infinite; } @keyframes spin { to { transform:rotate(360deg); } }
-@media (max-width:640px) { .navbtn span, .navbtn { font-size:0; padding:9px; } .navbtn svg { width:20px; height:20px; } }
-@media (max-width:680px) { div[style*="grid-template-columns: 2fr 1fr 1fr auto"] { grid-template-columns:1fr !important; } }
-@media (prefers-reduced-motion: reduce) { .float, .toast, .spin { animation:none; } * { transition:none !important; } }
-`;
+          <span
