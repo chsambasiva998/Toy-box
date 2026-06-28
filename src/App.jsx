@@ -736,7 +736,12 @@ function AdminProducts({ flash, onChanged, products }) {
       <div style={S.adminForm}>
         <input style={S.input} placeholder="Toy name" value={name} onChange={(e) => setName(e.target.value)} />
         <input style={S.input} type="number" step="0.01" placeholder="Price ₹ e.g. 299" value={price} onChange={(e) => setPrice(e.target.value)} />
-        <input style={S.input} placeholder="Category e.g. STEM" value={category} onChange={(e) => setCategory(e.target.value)} />
+        <select style={S.input} value={category} onChange={(e) => setCategory(e.target.value)}>
+          <option value="">Select category…</option>
+          {["STEM & Learning","Plush & Soft Toys","Classic & Wooden","Creative & Arts","Pretend Play","Baby & Infant","Games & Puzzles","Festive & Decor","Keepsakes & Gifts","Outdoor & Active"].map((c) => (
+            <option key={c} value={c}>{c}</option>
+          ))}
+        </select>
         <input style={S.input} placeholder="Age range e.g. 3-7" value={ageRange} onChange={(e) => setAgeRange(e.target.value)} />
         <input style={S.input} placeholder="Fallback emoji" value={emoji} onChange={(e) => setEmoji(e.target.value)} />
         <input style={S.input} type="number" step="0.1" min="0" max="5" placeholder="Rating 0-5" value={rating} onChange={(e) => setRating(e.target.value)} />
