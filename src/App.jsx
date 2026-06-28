@@ -287,7 +287,6 @@ function Store({ session }) {
               );
             })()}
             <section style={S.hero}>
-            <section style={S.hero}>
               <div style={S.heroInner}>
                 <div style={S.heroEyebrow}><Sparkles size={14} /> Gifts with meaning</div>
                 <h1 style={S.heroTitle}>Give love and respect, the Telugu way.</h1>
