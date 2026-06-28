@@ -266,8 +266,6 @@ function Store({ session }) {
       <main style={S.main}>
         {tab === "shop" && (
           <>
-            {tab === "shop" && (
-          <>
             {(() => {
               const upcoming = reminders.filter((r) => daysUntilYearly(r.remind_date) <= 14).sort((a, b) => daysUntilYearly(a.remind_date) - daysUntilYearly(b.remind_date));
               if (upcoming.length === 0) return null;
