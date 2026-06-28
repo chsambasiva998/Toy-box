@@ -24,7 +24,7 @@ const OCCASIONS = [
 ];
 
 const money = (n) => `₹${Number(n).toFixed(2)}`;
-const ADMIN_EMAIL = "YOUR_ADMIN_EMAIL@example.com";
+const ADMIN_EMAIL = "ch.sambasiva998@gmail.com";
 const NEW_DAYS = 14;
 
 const CATEGORIES = ["STEM & Learning","Plush & Soft Toys","Classic & Wooden","Creative & Arts","Pretend Play","Baby & Infant","Games & Puzzles","Festive & Decor","Keepsakes & Gifts","Outdoor & Active"];
