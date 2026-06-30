@@ -1,0 +1,121 @@
+Here's the full step-by-step. Two systems to update: Supabase (database — do this first) and GitHub (the files). Do Supabase first, because the new features error without the tables.
+PART A — Supabase (do this first)
+Open your Supabase project → SQL Editor → New query. Run each block below (paste, click Run). They're independent, so run them one at a time.
+A1. Reviews table (for the star ratings/reviews)
+sqlcreate table if not exists reviews (
+  id bigint generated always as identity primary key,
+  product_id bigint references products(id) on delete cascade,
+  user_id uuid references auth.users(id) on delete cascade,
+  rating int not null check (rating between 1 and 5),
+  comment text,
+  created_at timestamptz default now(),
+  unique (product_id, user_id)
+);
+alter table reviews enable row level security;
+create policy "reviews read" on reviews for select using (true);
+create policy "reviews insert own" on reviews for insert with check (auth.uid() = user_id);
+create policy "reviews update own" on reviews for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
+A2. Wallet payment saves the address (recreates the function with ship fields)
+sqlcreate or replace function purchase_with_wallet(
+  p_items jsonb, p_total numeric,
+  p_ship_name text default null, p_ship_phone text default null, p_ship_address text default null
+) returns void language plpgsql security definer set search_path = public as $$
+declare v_uid uuid; v_bal numeric;
+begin
+  v_uid := auth.uid();
+  select wallet into v_bal from profiles where id = v_uid for update;
+  if v_bal is null then raise exception 'No wallet'; end if;
+  if v_bal < p_total then raise exception 'Insufficient wallet balance'; end if;
+  update profiles set wallet = wallet - p_total where id = v_uid;
+  insert into wallet_log (user_id, type, amount) values (v_uid, 'Purchase', -p_total);
+  insert into orders (user_id, total, items, status, stage, ship_name, ship_phone, ship_address)
+    values (v_uid, p_total, p_items, 'paid', 'paid', p_ship_name, p_ship_phone, p_ship_address);
+end;
+$$;
+A3. The three earlier fixes — only if you haven't already run them. If approving orders, approving top-ups, or saving store settings still errors, run these. If they already work, skip.
+approve_order:
+sqlcreate or replace function approve_order(p_order_id bigint)
+returns void language plpgsql security definer set search_path = public as $$
+declare v_email text; v_o orders%rowtype; v_bonus numeric := 0;
+begin
+  v_email := auth.jwt() ->> 'email';
+  if lower(v_email) is distinct from lower('ch.sambasiva998@gmail.com') then raise exception 'Not authorized'; end if;
+  select * into v_o from orders where id = p_order_id for update;
+  if not found then raise exception 'Order not found'; end if;
+  if v_o.status <> 'pending' then raise exception 'Already processed'; end if;
+  if v_o.total > 2000 then v_bonus := 50; end if;
+  update orders set status = 'paid', stage = 'paid' where id = p_order_id;
+  update profiles set wallet = wallet + v_bonus where id = v_o.user_id;
+  if v_bonus > 0 then insert into wallet_log (user_id, type, amount) values (v_o.user_id, 'Order reward', v_bonus); end if;
+end;
+$$;
+approve_topup:
+sqlcreate or replace function approve_topup(p_topup_id bigint)
+returns void language plpgsql security definer set search_path = public as $$
+declare v_email text; v_t topup_requests%rowtype;
+begin
+  v_email := auth.jwt() ->> 'email';
+  if lower(v_email) is distinct from lower('ch.sambasiva998@gmail.com') then raise exception 'Not authorized'; end if;
+  select * into v_t from topup_requests where id = p_topup_id for update;
+  if not found then raise exception 'Top-up not found'; end if;
+  if v_t.status <> 'pending' then raise exception 'Already processed'; end if;
+  update topup_requests set status = 'approved' where id = p_topup_id;
+  update profiles set wallet = wallet + v_t.amount where id = v_t.user_id;
+  insert into wallet_log (user_id, type, amount) values (v_t.user_id, 'Wallet recharge', v_t.amount);
+end;
+$$;
+store_settings policy:
+sqlalter table store_settings enable row level security;
+drop policy if exists "store_settings read" on store_settings;
+drop policy if exists "store_settings admin insert" on store_settings;
+drop policy if exists "store_settings admin update" on store_settings;
+create policy "store_settings read" on store_settings for select using (true);
+create policy "store_settings admin insert" on store_settings for insert with check (lower(auth.jwt() ->> 'email') = lower('ch.sambasiva998@gmail.com'));
+create policy "store_settings admin update" on store_settings for update using (lower(auth.jwt() ->> 'email') = lower('ch.sambasiva998@gmail.com')) with check (lower(auth.jwt() ->> 'email') = lower('ch.sambasiva998@gmail.com'));
+That's Supabase done. Now GitHub.
+PART B — GitHub (the 28 files)
+You're moving from one src/App.jsx to a folder of small files. Important: your existing src/supabaseClient.js stays exactly as it is — do not touch or delete it. Everything else under src/ gets created or replaced.
+In GitHub, to create a file: go to the src folder → Add file → Create new file → type the name (including any folder, e.g. components/Store.jsx — typing the / makes the folder) → paste the contents from the matching downloaded file → scroll down → Commit. Repeat for each.
+Create in this order (dependencies first so nothing references a missing file mid-way — though since you commit them all before the build matters, order is mostly for your own tracking):
+Group 1 — foundations (in src/):
+
+src/i18n.js
+src/shared.js
+src/styles.js
+
+Group 2 — the lib folder:
+4. src/lib/supabaseClient.js
+Group 3 — UI + components (in src/components/):
+5. src/components/ui.jsx
+6. src/components/Reviews.jsx
+7. src/components/OrderTracker.jsx
+8. src/components/OrderCard.jsx
+9. src/components/ProductCard.jsx
+10. src/components/ProductDetail.jsx
+11. src/components/CartPanel.jsx
+12. src/components/WalletPanel.jsx
+13. src/components/ProfilePanel.jsx
+14. src/components/MyOrders.jsx
+15. src/components/RemindersPanel.jsx
+16. src/components/DesignStudio.jsx
+17. src/components/CheckoutModal.jsx
+18. src/components/RechargeModal.jsx
+19. src/components/AIAssistant.jsx
+20. src/components/AuthScreen.jsx
+21. src/components/Store.jsx
+Group 4 — admin (in src/components/admin/):
+22. src/components/admin/AdminOrderControls.jsx
+23. src/components/admin/AdminProducts.jsx
+24. src/components/admin/AdminOrders.jsx
+25. src/components/admin/AdminTopups.jsx
+26. src/components/admin/AdminSettings.jsx
+27. src/components/admin/AdminPanel.jsx
+Group 5 — last, the orchestrator:
+28. src/App.jsx — open the existing one, Edit (pencil), select all, delete, paste the new App.jsx contents, Commit.
+When you commit the last file, Vercel rebuilds automatically.
+PART C — Test after deploy
+Once the build goes green, check, in this order: switch language in the header (EN / తె / హి); open a product and leave a star review; open the Profile tab and save your name/phone/address; add an item and pay from wallet, then in Admin → Orders confirm the order shows the "Ship to" box with your address.
+Two honest notes. First, this is 28 files by hand — it's tedious on mobile, so go slowly; the payoff is that future changes touch one small file, not the whole app. Second, I verified the files' structure and that every import matches an export, but I couldn't run the actual bundler here (no network). If Vercel errors, it'll now name the one file at fault — paste me that line and the file name and it's a quick fix, not a hunt through 1,400 lines.
+One thing worth confirming so A2 is correct: does your current "pay from wallet" already work (it did earlier)? If yes, your existing purchase_with_wallet takes two arguments and A2 safely extends it to five with defaults, so old calls still work. If you ever customized that function's column names, tell me and I'll match them.02:59:38.009    at error (file:///vercel/path0/node_modules/rollup/dist/es/shared/parseAst.js:313:42)
+02:59:38.009    at Object.error (file:///vercel/path0/node_modules/rollup/dist/es/shared/node-entry.js:22704:20)
+02:59:38.009    at Object
